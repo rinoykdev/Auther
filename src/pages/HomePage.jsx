@@ -1,3 +1,5 @@
+import ConnectionStatus from '../components/ConnectionStatus'
+
 /**
  * Home — public placeholder.
  *
@@ -37,6 +39,8 @@ function HomePage() {
           </div>
         ))}
       </dl>
+
+      <ConnectionStatus />
     </section>
   )
 }
