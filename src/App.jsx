@@ -1,121 +1,61 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
-
+/**
+ * Temporary Step 2 verification surface.
+ *
+ * This component exists to prove that Tailwind v4 utilities compile and apply —
+ * in the dev server AND in the production build. It is replaced in Step 3 by
+ * real routing and placeholder pages.
+ *
+ * Every style below is a Tailwind utility class. There is no accompanying CSS
+ * file. If these styles render, Tailwind is wired up correctly.
+ */
 function App() {
-  const [count, setCount] = useState(0)
+  const checks = [
+    { label: 'Vite dev server', detail: 'Serving on port 5173' },
+    { label: 'Tailwind v4', detail: 'Utilities compiled via @tailwindcss/vite' },
+    { label: 'Design tokens', detail: '@theme colours generating utilities' },
+    { label: 'Dark mode', detail: 'Following your system appearance' },
+  ]
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
+      <div className="mb-10">
+        <p className="mb-2 font-mono text-xs tracking-widest text-brand-600 uppercase dark:text-brand-400">
+          Milestone 2 &middot; Step 2
+        </p>
+        <h1 className="text-4xl font-semibold tracking-tight text-slate-900 dark:text-white">
+          Auther
+        </h1>
+        <p className="mt-3 text-slate-600 dark:text-slate-400">
+          Authentication module scaffold. No authentication flows, database
+          tables or backend connection exist yet &mdash; this page only confirms
+          the toolchain works.
+        </p>
+      </div>
 
-      <div className="ticks"></div>
+      <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-slate-50 dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900/50">
+        {checks.map(({ label, detail }) => (
+          <li key={label} className="flex items-start gap-3 px-5 py-4">
+            <span
+              aria-hidden="true"
+              className="mt-1.5 size-2 shrink-0 rounded-full bg-brand-500"
+            />
+            <span>
+              <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
+                {label}
+              </span>
+              <span className="block text-sm text-slate-500 dark:text-slate-400">
+                {detail}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      <p className="mt-10 text-sm text-slate-500 dark:text-slate-500">
+        Next: Step 3 &mdash; feature-based folder structure and the Supabase
+        client with explicit PKCE configuration.
+      </p>
+    </main>
   )
 }
 
