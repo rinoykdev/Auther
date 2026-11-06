@@ -160,6 +160,14 @@ bursts, and hitting the limit looks like "verification is broken" rather than
 
 ---
 
+## Not configured, and deliberately so — including CI access
+
+**No Supabase credential of any kind belongs in GitHub Actions.** The approved
+pgTAP strategy (architecture H.6) runs database tests against a disposable
+PostgreSQL service container, precisely so that no secret key has to exist in a
+public repository's CI. If a future change appears to need one, that is the
+signal to re-read H.6 rather than to add the secret.
+
 ## Not configured, and deliberately so
 
 | Thing | Why not |

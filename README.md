@@ -105,3 +105,4 @@ Full detail: `docs/security.md` (written in Step 9) and architecture section E.5
 
 | `docs/token-claims.md` | Observed token behaviour; the `auth_time` finding |
 | `docs/milestone-2-test-report.md` | What was tested, what passed, what remains |
+| `docs/decisions.md` | Decision log — what was decided, why, and what changed when evidence disagreed |

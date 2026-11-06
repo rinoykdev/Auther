@@ -2,7 +2,7 @@
 
 *Stack: React + Vite (running locally), Supabase Cloud (Auth, hosted PostgreSQL, REST API, Storage, Edge Functions), Tailwind CSS v4, Git/GitHub. Deployment deferred. Status: planning only. No code, tables, SQL or dependencies have been created.*
 
-*Revision 4. Supersedes revisions 1 to 3 following your reviews. The structure, explanations and technical detail of earlier revisions are preserved; the changes are listed immediately below.*
+*Revision 5. Supersedes revisions 1 to 4 following your reviews. The structure, explanations and technical detail of earlier revisions are preserved; the changes are listed immediately below.*
 
 **Status: Milestone 1 approved.** This document is the agreed baseline for implementation.
 
@@ -45,6 +45,25 @@ Revision 4 makes **only** the infrastructure changes identified in Section 6 of 
 | Roadmap | Milestone 2 row matches the approved plan; a deployment milestone added at the end |
 | Checklist item 11 | Replaced by the cloud decision; Docker removed as a dependency |
 
+### Added in revision 5 — evidence from the Milestone 2 token investigation
+
+Revision 5 applies five amendments, all arising from behaviour **observed against
+a real Supabase Cloud project** on 2026-11-06 and recorded in `token-claims.md`.
+Revision 4 and earlier described some of this from expectation; revision 5
+replaces expectation with measurement.
+
+| # | Amendment | Status |
+| --- | --- | --- |
+| 1 | `amr[].timestamp` replaces `auth_time` as the recent-authentication signal, because **Supabase does not emit `auth_time`** | Approved. Reverses revision 4's ordering (C.8.1, checklist item 21) |
+| 2 | JWT claim list corrected — no `auth_time`; `amr` is an array of `{method, timestamp}` objects | Approved |
+| 3 | C.9 rule 3 corrected — it previously forbade using `amr` at all, which would now prevent the correct check being written | Approved |
+| 4 | The revoked-token experiment recorded as confirmed fact | Approved, with the correction that **GRANTs and RLS act together** as the database-side control, not RLS alone |
+| 5 | Leaked-password protection recorded as an **unmet production security requirement** — unavailable on the current plan | Approved |
+
+Also in revision 5: the Milestone 3 testing approach is settled (pgTAP against a
+pinned PostgreSQL service container in GitHub Actions — H.1, H.6), and five new
+test requirements are added for the `amr` timestamp check (H.3 Family 2).
+
 ---
 
 ## How to read this document
@@ -65,8 +84,7 @@ This is the blueprint for the project. Nothing in it is built yet, and nothing i
 - **GRANT / privilege:** the older, coarser PostgreSQL permission system that decides whether a role may touch a table or column *at all*. RLS runs only after a grant has already allowed the operation. Both matter; see Section E.4.
 - **Edge Function:** a small piece of server-side code hosted by Supabase. We use it only when something must run with secrets that cannot live in the browser.
 - **Reauthentication:** proving you are still the account owner, right now, before a dangerous action — by signing in again through Supabase Auth, not by handing a password to our own code.
-- **`amr` (Authentication Methods References):** a JWT claim listing *how* the user authenticated — password, OTP, OAuth provider, MFA factor. It answers "by what means?", not "how long ago?".
-- **`auth_time`:** a JWT claim giving the time at which the user actually authenticated, as seconds since the Unix epoch. It answers "when?". It is the claim a recent-authentication window is measured against.
+- **`amr` (Authentication Methods References):** a JWT claim that is an **array of objects**, each `{ method, timestamp }`. Its *membership* answers "by what means?"; its *timestamps* answer "when?". Supabase emits no separate `auth_time` claim, so both questions are answered from this one claim — which is why C.8.1 is careful about the difference.
 - **Recent-authentication window:** the maximum age of a user's last real authentication that we will accept before allowing a dangerous action. Proposed: 5 minutes for account deletion.
 
 ---
@@ -93,7 +111,7 @@ This section is new in revision 2 and governs everything that follows.
 | Admin panel | No admin users exist yet in a core-auth build; the panel is a consumer of roles, not a prerequisite | Route namespace `/admin`, folder `features/admin/`, Forbidden (403) page specified in Section F |
 | Role management (`user_roles`, role assignment, `RoleGuard`) | Nothing in core auth branches on role | Full table and policy design retained in Section D.7 as a ready-to-apply addition; `AuthProvider` exposes a `roles` value that is an empty array until the feature lands |
 | Account deletion | It is the single most dangerous operation in the system and deserves its own milestone with its own test pass | Complete design retained in Sections C.8 and G.3; `accountService.js` is specified but not implemented |
-| Multi-factor authentication (MFA) | Supabase supports it natively; adding it later changes configuration and one screen, not the architecture | The JWT already carries `aal`, `amr` and (subject to verification) `auth_time`; Section C.9 and the reauthentication design read those claims, so an MFA step slots in without changing the session model |
+| Multi-factor authentication (MFA) | Supabase supports it natively; adding it later changes configuration and one screen, not the architecture | The JWT already carries `aal` and `amr`; Section C.9 and the reauthentication design read those claims, so an MFA step slots in without changing the session model. Note MFA makes `amr` multi-entry, which the recency check must already handle (C.8.1, H.3 Family 2) |
 | Social login (Google, GitHub) | Adds provider configuration and callback cases before the core flow is proven | The callback page in Section C.2 is written to handle any PKCE code exchange, not only email confirmation; `authService` gets one extra method |
 | Audit log table, avatar file storage, organisations/teams | Not needed to authenticate anyone | Noted in Section D.8 |
 
@@ -179,7 +197,7 @@ These follow from the infrastructure decision and are recorded here so later mil
 - **Shared, mutable state.** The database, the auth user list and the rate limits are common to everyone working on the project. One person's testing is visible to the others.
 - **No offline development.** The backend is a network dependency.
 - **Email has no local inbox.** Verification and reset emails go to real mailboxes through Supabase's built-in sender, which is rate-limited and intended for testing. This constrains Milestone 4 rather than launch (checklist item 10).
-- **Database tests need a hosted target.** The pgTAP strategy in H.1 assumed a disposable local database. How it runs against a cloud project is an open decision for Milestone 3.
+- **Database tests needed a new home.** The pgTAP strategy in H.1 assumed a disposable local database. **Resolved in revision 5:** a pinned PostgreSQL service container in GitHub Actions, with no Supabase credential in CI (H.6).
 - **An exposed table is exposed to the internet.** The security design is unchanged, but the blast radius of a mistake is larger. This is why the rule in checklist item 14 — no table without RLS, grants and tests in the same migration — is not negotiable.
 
 ### A.6 Dependencies for this milestone
@@ -338,7 +356,7 @@ Because we turn on **"Confirm email"** in Supabase settings, users cannot log in
 - It subscribes to `onAuthStateChange`, so the UI automatically reacts to login, logout, token refresh and password recovery events, including in other browser tabs.
 - supabase-js silently refreshes the access token before it expires using the refresh token. Refresh tokens are single-use and rotated.
 - If a refresh fails (revoked, expired, reuse detected), the user is signed out and sent to Login.
-- **Important:** a token refresh produces a new JWT but does **not** re-prove the user's identity. `iat` and `exp` move forward; the *authentication* time does not, because no authentication occurred. The claim that records when the user actually authenticated (`auth_time`, subject to the verification in C.8.1) is what a sensitive action must read. This distinction is the foundation of the reauthentication design in C.8.
+- **Important:** a token refresh produces a new JWT but does **not** re-prove the user's identity. `iat` and `exp` move forward; the *authentication* time does not, because no authentication occurred. **Verified in Milestone 2:** across a refresh `iat` advanced while `amr[].timestamp` held steady. That timestamp is what a sensitive action must read (C.8.1), and this distinction is the foundation of the reauthentication design in C.8.
 
 ### C.5 Forgot password and reset password
 
@@ -378,7 +396,7 @@ Revision 1 proposed that the user re-enter their password and that React send it
 The Delete Account screen asks for the typed confirmation phrase and the current password. React calls **`supabase.auth.signInWithPassword`** with the signed-in user's own email and the typed password. This is an ordinary Supabase Auth call: the password goes to Supabase and nowhere else.
 
 - If the password is wrong, the call fails and we show an error. Nothing else happens.
-- If it is correct, Supabase returns a **fresh session** issued by a genuine authentication event, so the authentication time carried by the new access token is *now*. The claim that records this, and what we do if it is absent, is specified in C.8.1.
+- If it is correct, Supabase returns a **fresh session** issued by a genuine authentication event, so the `amr[].timestamp` carried by the new access token is *now*, and the session gets a new `session_id`. Both verified in Milestone 2 (C.8.1).
 - If MFA is ever enabled, this same step naturally gains the second factor and the new token's `aal` rises to `aal2`. The design does not change.
 
 *(Where Supabase's `reauthenticate()` nonce flow fits: that call sends a one-time code by email and is the right tool when we want proof of mailbox control rather than proof of password. It is the mechanism behind "secure password change" in C.7. For deletion, password reauthentication is the better match because the mailbox may be the very thing an attacker controls. We can require both later without changing the architecture.)*
@@ -392,7 +410,7 @@ Running server-side with the secret key, the function:
 1. Reads the bearer token from the header. A missing or malformed header is a `401`.
 2. **Verifies the token with Supabase Auth** — by calling `auth.getUser(jwt)`, which validates the signature and that the session still exists server-side, rather than merely decoding the token. A decode-only check would accept a token from a session that was already signed out.
 3. Takes the user ID **from the verified token's `sub` claim**. It never reads a user ID from the body, the query string, or any header the client controls. There is no code path in which a user ID supplied by the caller reaches the delete call — this is the property that makes "delete someone else's account" structurally impossible rather than merely blocked.
-4. **Checks authentication recency:** reads the **authentication time** from the verified token (`auth_time`, or the fallback established in C.8.1) and rejects the request with `401` and a `reauthentication_required` code if it is older than the configured window — proposed: **5 minutes**. This is what forces Step 1 to have actually happened, and it is why a long-lived stolen token, or a token merely refreshed in the background, cannot delete an account. **`amr` is not used for this check** (C.8.1).
+4. **Checks authentication recency:** reads the **maximum `amr[].timestamp`** from the verified token and rejects the request with `401` and a `reauthentication_required` code if it is older than the configured window — **5 minutes**. This is what forces Step 1 to have actually happened, and it is why a long-lived stolen token, or a token merely refreshed in the background, cannot delete an account. **`amr` membership is not used for this check** (C.8.1).
 5. **Optionally checks `amr` and `aal` for method and strength**, not for recency: `amr` tells us the caller authenticated by password rather than, say, resuming a social session, and `aal` tells us whether MFA was satisfied. Once MFA exists we require `aal2` for enrolled users.
 6. Calls `auth.admin.deleteUser(userIdFromToken)`. Cascading foreign keys remove the profile and any future role rows.
 7. Returns a success response. React then calls `signOut` and sends the user to a public page.
@@ -404,8 +422,8 @@ Running server-side with the secret key, the function:
 | Password verified by Supabase Auth, never by us | Password exposure in our function's memory, logs, error reporting or request traces |
 | Token verified server-side via `getUser`, not decoded | A forged or already-revoked token being accepted |
 | User ID read only from the verified `sub` | One user deleting another by sending a different ID |
-| Recency window measured on the **authentication time** claim, verified server-side | A stolen or borrowed session deleting the account hours later; a background refresh silently counting as "recent" |
-| `amr` checked for **method**, never for recency | Accepting a token that merely *lists* a password method from an authentication that happened days ago |
+| Recency window measured on the **maximum `amr[].timestamp`**, read from the verified token | A stolen or borrowed session deleting the account hours later; a background refresh silently counting as "recent" |
+| `amr` **membership** checked for method only, never for recency | Accepting a token that merely *lists* a password method from an authentication that happened days ago |
 | Empty request body | Any injection path through parameters we never read |
 | Origin allow-list and CORS restricted to our app | A hostile site calling the function from a victim's browser |
 | Rate limit per user | Automated abuse of the endpoint |
@@ -414,45 +432,57 @@ Running server-side with the secret key, the function:
 
 **Deletion semantics: permanent (hard) delete.** Confirmed as the initial approach, on the basis that there are no retention requirements. `auth.admin.deleteUser` removes the row from `auth.users`, and the `ON DELETE CASCADE` foreign keys remove the profile and any future role rows in the same transaction. There is no `deleted_at` column, no tombstone row and no recovery path: once the function returns success, the account is gone. Two consequences we accept deliberately — a user who deletes by mistake must register again from scratch, and the confirmation UI therefore has to be unambiguous (typed phrase plus reauthentication, Section F screen 13). If a retention or legal requirement ever appears, soft delete is an additive change: a nullable `deleted_at` on `profiles`, a policy excluding deleted rows, and a scheduled purge — the Edge Function's verification logic in C.8 is unaffected either way.
 
-### C.8.1 The recent-authentication window: `amr` vs `auth_time`
+### C.8.1 The recent-authentication window: method versus moment
 
-Revision 2 used `amr` as the recency signal. **That was wrong, and this section corrects it.** The two claims answer different questions and conflating them produces a check that looks strict and is not.
+**Revision 5, written from measurement.** Revision 2 used `amr` membership as the recency signal, which was wrong. Revision 4 corrected it to `auth_time` — but **Supabase does not emit an `auth_time` claim** (verified 2026-11-06, `token-claims.md`). This section is now written against what the tokens actually contain.
+
+The distinction that matters is unchanged and is the whole point: **which method** a user authenticated by is a different question from **when** they did it. What has changed is that both answers live inside the same claim, which makes the distinction easier to get wrong, not harder.
 
 | Claim | Question it answers | Shape | Correct use here |
 | --- | --- | --- | --- |
-| `amr` | **How** did this user authenticate? | A list of authentication methods — password, OTP, an OAuth provider, an MFA factor | Deciding whether the *method* is acceptable for this action (for example: require a password, not a resumed social session) |
-| `auth_time` | **When** did this user authenticate? | A single numeric timestamp, seconds since the Unix epoch | Measuring the recent-authentication window |
+| `amr` **membership** | **How** did this user authenticate? | An array of objects, each `{ "method": "password", "timestamp": <epoch> }` | Deciding whether the *method* is acceptable for this action (for example: require a password, not a resumed social session). **Never** a recency signal |
+| `amr[].timestamp` | **When** did this user authenticate? | Epoch seconds, one per method entry | **Measuring the recent-authentication window.** Verified: unchanged across a refresh, advances on reauthentication |
+| `auth_time` | — | **Not emitted by Supabase** | Unavailable. Recorded here so the absence is explicit rather than rediscovered |
 | `aal` | How **strong** was the authentication? | `aal1` / `aal2` | Requiring MFA for enrolled users |
 | `iat` | When was this **token** issued? | Numeric timestamp | **Never** used for recency — a background refresh moves it without the user proving anything |
 
 **Why `amr` alone must never be treated as proof of recency.** `amr` is a list of methods. A token that lists `password` is telling us the session originated from a password sign-in — it is not telling us that happened recently. A session authenticated by password a week ago and silently refreshed every hour since still carries `password` in `amr`. A check that reads `amr` and concludes "the user authenticated with a password, so they have reauthenticated" accepts exactly the stolen-session case the check exists to stop.
 
-A further trap: some implementations, Supabase's included, attach a per-method `timestamp` to entries inside the `amr` structure. That timestamp is *tempting* and is not the same guarantee as a dedicated `auth_time` claim — its presence, shape and update semantics are implementation details that can change between versions, and reasoning about "the newest timestamp in the list" is fragile. We therefore specify the check against `auth_time`, and treat anything else as a documented fallback rather than the design.
+**Why the timestamp inside `amr` is nevertheless the right signal.** Revision 4 called it fragile, on the grounds that its shape and update semantics were undocumented implementation details. That judgement was made without evidence. Two things now stand against it:
+
+- **Measured behaviour.** Across a token refresh `iat` advanced while `amr[].timestamp` held steady; a reauthentication moved it to now. That is precisely the contract a recency window requires.
+- **A documented shape.** Supabase's Custom Access Token hook publishes a JSON schema in which `amr` appears with timestamped entries. That is a firmer contract than "internal detail".
+
+**A trap specific to this design.** Because membership and moment now live in one claim, the sentence "use `amr`" and the sentence "don't use `amr`" are both wrong. The correct rule is narrower: *use the timestamp, never the membership, as the recency signal.*
+
+**A second trap, new with MFA.** `amr` is an array. Once MFA exists it will carry more than one entry. The check must read the **most recent timestamp across all entries** and must never assume a single element — code written against today's one-element array will silently read the wrong entry later. This is tested explicitly (H.3 Family 2).
 
 **The rule we implement.** The Edge Function:
 
 1. verifies the token server-side (C.8 Step 3.2) — **every claim below is read only from the verified token**, never from a client-supplied copy and never from an unverified decode;
-2. reads the authentication time from `auth_time`;
-3. computes `now - auth_time` and rejects with `401 reauthentication_required` if it exceeds the window;
-4. separately reads `amr` to confirm the authentication *method* is one we accept for deletion, and `aal` to confirm strength;
-5. rejects if `auth_time` is absent, malformed, or in the future (clock skew beyond a small tolerance is treated as a failure, not rounded away).
+2. reads the authentication time as **the maximum `timestamp` across all `amr` entries**;
+3. computes `now - thatTimestamp` and rejects with `401 reauthentication_required` if it exceeds the window;
+4. separately reads `amr` **membership** to confirm the authentication *method* is one we accept for deletion, and `aal` to confirm strength. These are independent checks: an acceptable method with a stale timestamp is still a rejection;
+5. rejects if `amr` is absent, empty, contains no numeric timestamp, or yields a timestamp in the future (clock skew beyond a small tolerance is a failure, not something to round away).
 
 **The window: 5 minutes, as an initial design proposal.** Long enough that a user who reauthenticates, reads the warning text and types the confirmation phrase does not get bounced; short enough that a token lifted from storage is almost always stale. It is a constant in one place, not scattered through the function.
 
-**What must be verified in Milestone 2, before any of this is built.** This design asserts things about Supabase's tokens that we have not yet observed, and I am not willing to have them assumed:
+**Verified in Milestone 2 (2026-11-06).** Full evidence in `token-claims.md`:
 
-- **Does the access token actually contain `auth_time`?** Supabase's JWT claim set is documented, but claim availability varies by version and configuration. We will mint a real token locally, decode it, and record the full claim set in `docs/`.
-- **What happens to that claim across a refresh?** We will capture a token, wait for or force a refresh, and compare. The required property is that the authentication-time claim does **not** advance on refresh. If it does advance, it is useless for this purpose and we fall back immediately.
-- **What happens to it on reauthentication?** A second `signInWithPassword` must move it to now.
-- **Exact shape of `amr`** — array of strings, or array of objects with `method` and `timestamp` — recorded so the method check is written against reality.
+| Question | Answer |
+| --- | --- |
+| Does the token contain `auth_time`? | **No.** Absent entirely |
+| Shape of `amr`? | Array of objects: `{ method, timestamp }` |
+| Does `amr[].timestamp` survive a refresh? | **Yes** — unchanged while `iat` advanced |
+| Does reauthentication move it? | **Yes** — advanced by the real elapsed time |
 
-**Fallback if `auth_time` is not present or does not behave as required**, in order of preference:
+**Approved ordering (revision 5).** This replaces revision 4's ordering, which ranked the `amr` timestamp last:
 
-1. **Server-side session inspection.** The function, already holding the secret key, reads the session referenced by the token's `session_id` through the Admin API and uses the authoritative server-side authentication timestamp. This is strictly better than any client-carried claim — it cannot be stale or forged — at the cost of one extra server call per deletion, which is irrelevant for an operation performed once per account.
-2. **A custom access token hook** that injects a trustworthy `auth_time` claim at token-issue time, server-side.
-3. **The timestamp inside `amr`**, used only if neither of the above is available, documented as a known-fragile dependency with a test that fails loudly if its shape changes.
+1. **`amr[].timestamp`** — the design. Verified, free, adds no new surface, needs no extra call.
+2. **Server-side session inspection** via the Admin API at deletion time — optional defence-in-depth once the secret key exists and the endpoint shape is verified. Authoritative, since server state cannot be stale or forged.
+3. **A Custom Access Token hook** injecting a stable claim — available on the free plan, but deliberately ranked below the others: a hook runs on **every token issue for every user**, so a bug there is in the login path of the whole system. It would also have to read `auth.sessions` to avoid advancing on refresh — reintroducing the exact bug this section exists to prevent. That is a large, permanently-live surface to solve a problem one function needs once per account deletion.
 
-Whichever path the evidence selects, the architectural rule is unchanged and binding: **the window is measured against a verified timestamp of the authentication event itself, and `amr` is never, on its own, accepted as proof that authentication was recent.**
+**The binding rule, unchanged across every revision:** the window is measured against a verified timestamp of the authentication **event**, and the presence of a method in `amr` is never, on its own, accepted as proof that authentication was recent.
 
 ### C.9 Session state transition reference
 
@@ -473,9 +503,9 @@ This section is new in revision 2. It is the precise answer to "what is the sess
 | Callback page loads | anonymous, code in URL | `detectSessionInUrl` (or explicit `exchangeCodeForSession`) swaps code + stored verifier for tokens; URL is cleaned | `INITIAL_SESSION`, then `SIGNED_IN` | **authenticated** |
 | Callback loads in a *different* browser | anonymous, code in URL | exchange fails — no verifier present | `INITIAL_SESSION` (`null`) only | anonymous; show recoverable error + resend |
 | Callback loads with a used or expired code | anonymous | exchange rejected by Supabase | `INITIAL_SESSION` (`null`) only | anonymous; show recoverable error + resend |
-| Login | anonymous | `signInWithPassword` | `SIGNED_IN` | authenticated; **authentication time = now**; `amr` records the method |
-| Background token refresh | authenticated | refresh token rotated | `TOKEN_REFRESHED` | authenticated; `iat`/`exp` advance; **authentication time unchanged**; `amr` unchanged |
-| Reauthentication before a sensitive action | authenticated | `signInWithPassword` again | `SIGNED_IN` | authenticated; **authentication time = now** — this is the transition the window in C.8.1 measures |
+| Login | anonymous | `signInWithPassword` | `SIGNED_IN` | authenticated; **`amr[].timestamp` = now**; `amr` membership records the method |
+| Background token refresh | authenticated | refresh token rotated | `TOKEN_REFRESHED` | authenticated; `iat`/`exp` advance; **`amr[].timestamp` unchanged** (verified); `session_id` unchanged |
+| Reauthentication before a sensitive action | authenticated | `signInWithPassword` again | `SIGNED_IN` | authenticated; **`amr[].timestamp` = now** (verified), and a **new `session_id`** — this is the transition the window in C.8.1 measures |
 | Forgot-password link clicked | usually anonymous | Supabase validates token, redirects to `/reset-password?code=…` | *(none yet)* | anonymous; code in URL |
 | Reset page loads | anonymous, code in URL | code exchanged for a **full session** | `INITIAL_SESSION`, then `PASSWORD_RECOVERY` | **authenticated** — and this is the dangerous moment; see rule below |
 | New password submitted | authenticated (recovery) | `updateUser({ password })` | `USER_UPDATED` | authenticated, ordinary session |
@@ -488,7 +518,9 @@ This section is new in revision 2. It is the precise answer to "what is the sess
 
 1. **Route decisions wait for `INITIAL_SESSION`.** `AuthProvider` starts in `loading` and no guard redirects until the first event arrives. Otherwise a logged-in user is bounced to Login on every refresh.
 2. **The Reset Password page is gated on the `PASSWORD_RECOVERY` event, not on having a session.** Because the recovery exchange creates a real session, "is the user signed in?" is the wrong question. The page records that the event fired during this page load and renders the password form only then. If the user navigates away without completing the reset, the app treats that session as ordinary — which is acceptable, because it was obtained by proving mailbox control — but the reset form itself is never reachable without the event.
-3. **`TOKEN_REFRESHED` is not proof of identity.** Any code deciding "has this user authenticated recently?" reads the **authentication-time** claim from the verified token — never `iat`, never the token's freshness, and never `amr`, which records the method and not the moment. This is the server-side check in C.8 Step 3.4, specified in full in C.8.1.
+3. **`TOKEN_REFRESHED` is not proof of identity.** Any code deciding "has this user authenticated recently?" reads the **maximum `amr[].timestamp`** from the verified token — never `iat`, and never the token's freshness.
+
+   Revision 4 phrased this rule as "never `amr`, which records the method and not the moment". That phrasing is now wrong and would prevent the correct check being written: `amr` is *both* the method record *and* the timestamp source. The precise rule is **never use `amr` membership as a recency proxy; always use its timestamp**. This is the server-side check in C.8 Step 3.4, specified in full in C.8.1.
 4. **`getSession()` reads local storage; `getUser()` asks the server.** The client may use `getSession()` for rendering. Anything that matters is verified server-side. No security decision anywhere in this system is made from a client-side session read.
 
 ---
@@ -593,7 +625,14 @@ Audit log table, avatar file storage, multi-factor authentication, social login,
 
 - Passwords are handled by Supabase Auth: hashed with a strong algorithm, never stored or readable in plain text, never touched by our own database tables, and — as of this revision — **never sent to any code we wrote**, including Edge Functions.
 - We enable **email confirmation** so every account is tied to an address the owner controls.
-- We set a **minimum password policy** (length matters more than complexity) in Supabase settings, mirrored by frontend validation for UX. We will also enable Supabase's **leaked-password check**, which rejects passwords found in known breach corpora; it is a configuration toggle and it prevents more real compromises than any complexity rule.
+- We set a **minimum password policy** (length matters more than complexity) in Supabase settings, mirrored by frontend validation for UX. **Applied and verified 2026-11-06: minimum 10 characters, enforced server-side.**
+- **Leaked-password protection — an UNMET production security requirement.** Supabase's leaked-password check rejects passwords found in known breach corpora and prevents more real compromises than any complexity rule. **It is gated behind a paid plan and is not available on the current tier** (confirmed 2026-11-06 by probe: `password123` is accepted). **This project therefore does not satisfy this control.**
+
+  The exposure is **credential stuffing** — an attacker replaying email/password pairs leaked from other services. Password *length* does not mitigate it, because the password is already known; raising the minimum is not a fix and must not be recorded as one.
+
+  Note the natural server-side workaround is gated higher still: Supabase's Password Verification Attempt hook is Teams/Enterprise only. A client-side breach check (e.g. the HaveIBeenPwned k-anonymity API) is **user experience only and not a security boundary**, since it is trivially bypassed by calling the API directly.
+
+  **Before production:** enable the paid plan, or implement a server-side equivalent. Tracked in `supabase-config.md` and `security.md`.
 - Login errors are deliberately vague.
 - Supabase applies **rate limits** on auth endpoints. We will review and tighten them, and consider CAPTCHA (Supabase supports it) if abuse appears.
 
@@ -601,14 +640,20 @@ Audit log table, avatar file storage, multi-factor authentication, social login,
 
 - The **access token** (JWT) is short-lived. Even if stolen, it expires soon.
 - The **refresh token** is single-use and rotated; reuse detection helps spot theft.
-- Inside the JWT: user ID (`sub`), the database role claim (`authenticated`), `iat`, `exp`, email, `session_id`, `aal` (assurance level), `amr` (**which methods** were used) and, subject to the verification in C.8.1, `auth_time` (**when** authentication happened). The database trusts the token because it is cryptographically signed.
-- **These three are not interchangeable.** `auth_time` answers "how long ago?" and is the only claim a recent-authentication window may be measured against. `amr` answers "by what means?" and is used to require a password rather than a resumed session. `iat` answers "when was this token minted?" and is never a recency signal, because a background refresh moves it without the user proving anything. Treating `amr` as a recency signal — as revision 2 did — accepts a week-old session that was merely refreshed.
+- Inside the JWT, as observed 2026-11-06: `iss`, `sub` (user id), `aud`, `exp`, `iat`, `email`, `phone`, `app_metadata`, `user_metadata`, `role` (the database role PostgREST switches to), `aal` (assurance level), `amr`, `session_id`, `is_anonymous`. The database trusts the token because it is cryptographically signed.
+- **There is no `auth_time` claim.** Supabase does not emit one. `amr` is an **array of objects**, each carrying both `method` (how) and `timestamp` (when).
+- **These are not interchangeable, and the trap is finer than it looks.** `amr[].timestamp` answers "how long ago?" and is the only value a recency window may be measured against. `amr` **membership** answers "by what means?" and proves nothing about recency — a session authenticated by password a week ago and refreshed hourly since still lists `password`. `iat` answers "when was this token minted?" and is never a recency signal, because a background refresh moves it without the user proving anything. Because membership and moment now live in the same claim, "use `amr`" and "avoid `amr`" are both wrong instructions; see C.8.1.
+- **Sign-out does not invalidate an access token at the data API (confirmed 2026-11-06).** `signOut` revokes the refresh token and the server-side session, so `getUser()` refuses the token immediately. **PostgREST does not**: it validates the signature and `exp` and knows nothing about revoked sessions, so a stolen access token keeps working against the database until it expires — up to an hour.
+
+  This is inherent to stateless JWT validation, not a misconfiguration. What limits the damage is the pair of **database-side access controls described in E.4: PostgreSQL GRANTs and RLS policies, which operate together.** A request must pass *both* gates — the role must hold the table and column privilege at all, and then the row policy must permit the specific rows. Neither is sufficient alone, and this one-hour window is the clearest practical reason both must be correct before any table ships (checklist item 14).
+
+  It is also why C.8 requires privileged Edge Functions to verify with `getUser()` rather than decode: a decode-only check would accept exactly this revoked token.
 - Important rule: in React, `getSession()` reads what is stored in the browser, which can be tampered with. For security decisions, anything sensitive is verified server-side, and when we need certainty in the client we use `getUser()`, which asks the server.
 - **Token storage:** supabase-js stores sessions in browser storage by default. This is standard for single-page apps, but it means **Cross-Site Scripting (XSS)** is the main threat. Mitigations: never inject raw HTML (React escapes output by default), avoid risky libraries, keep dependencies patched, and add security headers (a Content Security Policy) at the hosting layer when the frontend is deployed — **deferred with deployment, and tracked as an open item so it is not forgotten** (E.6). A cookie-based server-rendered approach is an alternative we are **not** choosing, to avoid complexity — a decision we revisit if the app's risk profile changes.
 
 ### E.3 Authorization: RLS
 
-- **RLS ON for every table in the `public` schema**, with no exceptions. A table with RLS off is readable and writable by anyone holding the publishable key *if the client role has been granted access to it* — which is why E.4 matters too.
+- **RLS ON for every table in the `public` schema**, with no exceptions. A table with RLS off is readable and writable by anyone holding the publishable key *if the client role has been granted access to it* — which is why E.4 matters too. The two are a pair, not alternatives: **GRANTs decide whether the role may touch the table at all; RLS decides which rows.** E.2's post-sign-out finding makes this concrete — for up to an hour after sign-out, these two controls are the only thing standing between a revoked token and the data.
 - **Default deny:** with RLS on and no policy, nobody gets access. We add the minimum policies needed.
 - Policies in the initial implementation:
   - `profiles`: a user may `SELECT` and `UPDATE` **only their own row** (`(select auth.uid()) = id`). No client `INSERT` (the trigger does it) and no client `DELETE` (cascade handles it).
@@ -777,7 +822,7 @@ Used only where a privileged key is required or where an action cannot be expres
 
 | Operation | Why it needs a function | Milestone |
 | --- | --- | --- |
-| **Delete account** | Deleting from `auth.users` requires the secret key, which can never be in the browser. The function verifies the caller's JWT, enforces the recent-authentication window from the verified `auth_time` claim (C.8.1), and deletes **only the `sub` in that verified token**. It accepts no password and no user ID (C.8) | Deferred |
+| **Delete account** | Deleting from `auth.users` requires the secret key, which can never be in the browser. The function verifies the caller's JWT, enforces the 5-minute recent-authentication window from the **maximum verified `amr[].timestamp`** (C.8.1), and deletes **only the `sub` in that verified token**. It accepts no password and no user ID (C.8) | Deferred |
 | **Admin: read authentication data** | `auth.users` is not reachable from the client and must not be made reachable. The function verifies the JWT, confirms the admin role using privileged credentials, calls the Admin API, and returns only the needed fields (D.6) | Deferred |
 | **Admin: assign or revoke roles** | The client role holds no write privilege on `user_roles` by design, so writes must happen server-side, where an audit entry can be written in the same transaction | Deferred |
 | Custom email logic, webhooks | Not needed | Deferred |
@@ -786,7 +831,7 @@ Used only where a privileged key is required or where an action cannot be expres
 
 1. It verifies the bearer token with Supabase Auth; it never merely decodes it.
 2. It derives the acting user from the verified `sub` claim only.
-3. For privileged actions on the caller's own account, it enforces a recent-authentication window measured against the verified authentication-time claim (`auth_time`), and uses `amr` only to check the authentication *method* (C.8.1).
+3. For privileged actions on the caller's own account, it enforces a recent-authentication window measured against the **maximum verified `amr[].timestamp`**, and uses `amr` membership only to check the authentication *method* (C.8.1).
 4. For privileged actions on *other* records, it checks the caller's authorization server-side, with privileged credentials, before touching anything.
 5. It never accepts a password, a secret, or a subject identifier from the request.
 6. It restricts allowed origins and rate-limits per user.
@@ -812,7 +857,7 @@ Principle: **nothing is considered working until a test or a documented manual c
 | --- | --- | --- |
 | Unit tests | Vitest | Validators, error-message mapping, helper functions |
 | Component tests | Vitest and React Testing Library | Forms show errors, buttons disable while submitting, guards redirect correctly, the Reset page refuses to render without `PASSWORD_RECOVERY` (Supabase mocked) |
-| Database, grant and RLS tests | pgTAP, run against a hosted project | Both gates in E.4: that privileges are what we think, and that policies block and allow what we expect, with real database roles. **How these run without a local database is an open decision for Milestone 3** (A.5.1) |
+| Database, grant and RLS tests | pgTAP, run against a **pinned PostgreSQL service container in GitHub Actions** (H.6) | Both gates in E.4: that privileges are what we think, and that policies block and allow what we expect, with real database roles |
 | Integration tests | Supabase Cloud development project | Real sign-up, login and profile calls against the hosted development project |
 | API-level security tests | Scripted HTTP requests (no browser) | Section H.3's unauthorized-request family: raw calls to PostgREST and Edge Functions with forged, missing, expired and borrowed tokens |
 | End-to-end tests | Playwright | Full journeys in a real browser against the locally served app. **Journeys requiring an email have no automated inbox** — the local one is gone with the local stack. How email-dependent journeys are tested is decided in Milestone 4, alongside custom SMTP (checklist item 10); until then they are manual |
@@ -857,6 +902,16 @@ Four named families, each with concrete cases and an explicit pass condition. Th
 | Admin endpoint called by a normal user *(with roles)* | Call the admin Edge Function with a valid non-admin token | `403`, and no data in the body |
 | Column-grant enforcement | `update profiles set id = <other uuid>` or `set created_at = …` | Rejected at the column-privilege gate |
 
+**Family 2a — the recent-authentication check (`amr[].timestamp`).** Required by revision 5. These guard the specific ways this check fails open; each is a test that must exist before any deletion code ships.
+
+| # | Case | Method | Pass condition |
+| --- | --- | --- | --- |
+| 1 | **Multiple `amr` entries / MFA** | Token whose `amr` holds several entries with different timestamps — e.g. `password` at T−10min and `mfa` at T−1min | The check reads the **maximum** timestamp and accepts. A naive `amr[0]` read would take the stale entry and reject a legitimate user; the inverse ordering must also be tested, where taking the wrong element would wrongly **accept** |
+| 2 | **Missing or malformed timestamp** | `amr` absent; `amr` present but empty; entry with no `timestamp`; `timestamp` a string, `null`, or `NaN` | **`401` in every case — fails closed.** Never treated as "recent", never coerced to 0 (which would read as 1970 and reject) or to `Date.now()` (which would accept everything) |
+| 3 | **Future timestamp** | `timestamp` set beyond a small clock-skew tolerance ahead of server time | `401`. A future value is not rounded down to "now"; it indicates a forged or broken token |
+| 4 | **Expired five-minute window** | Valid token whose maximum `amr[].timestamp` is older than 5 minutes — and separately, a token **refreshed** after the window elapsed | `401 reauthentication_required` in both. The refresh variant is the one that would have caught the revision-2 error |
+| 5 | **Accepted methods and assurance level** | `amr` listing only a non-accepted method with a *fresh* timestamp; and a user enrolled in MFA presenting `aal1` | Rejected. Asserts the method check, the `aal` check and the recency check are **independent** — a fresh timestamp does not excuse an unacceptable method, and an acceptable method does not excuse a stale timestamp |
+
 **Family 3 — Account enumeration (can an outsider learn which emails are registered?)**
 
 | Case | Method | Pass condition |
@@ -877,19 +932,19 @@ Four named families, each with concrete cases and an explicit pass condition. Th
 | Malformed token | `Authorization: Bearer garbage` | `401`, no data |
 | Tampered payload, valid structure | Decode a real token, change `sub` to another user, re-encode without a valid signature | `401` — signature verification fails before any row is considered |
 | Expired token | Token past `exp` | `401`; a refresh is required |
-| Token from a signed-out session | Sign out, then replay the previously valid access token against PostgREST **and** against an Edge Function | PostgREST may accept it until `exp` (it validates the signature, not server state) — we assert this is true and that it is survivable because the window is short, while the Edge Function **rejects it**, because it calls `getUser` and sees the session is gone. Documenting this difference is the point of the test |
+| Token from a signed-out session | Sign out, then replay the previously valid access token against PostgREST **and** against an Edge Function | **Confirmed 2026-11-06.** PostgREST **accepts** it until `exp` — it validates the signature, not server-side session state. `getUser()` **rejects** it (`403`, "Session from session_id claim in JWT does not exist"), because it checks the `session_id` claim against live session state. The refresh token is revoked (`400`). The test asserts this *difference*, which is the point. **Method note:** probe a table path, not `/rest/v1/` — the REST root requires a secret key and returns `401` regardless of token validity, which proves nothing |
 | Replayed verification link | Use the same confirmation link twice | Second use fails; callback shows the recoverable error and offers resend |
 | Replayed reset link | Use the same recovery link twice | Second use fails; page shows "invalid or expired", never the password form |
 | Reset page without a link | Navigate directly to `/reset-password` while signed in as an ordinary user | Password form is **not** rendered (C.9 rule 2) |
 | Redirect outside the allow-list | `emailRedirectTo` pointing at an external domain | Supabase refuses; the user is sent to the site URL instead |
 | *(deferred)* Delete-account without a token | Call the function with no `Authorization` header | `401`, nothing deleted |
 | *(deferred)* Delete-account with another user's ID in the body | Valid token for A, body containing B's ID | A is deleted (the body is ignored entirely) or the call is rejected — **B is untouched**. We assert B still exists |
-| *(deferred)* Delete-account without recent reauthentication | Valid token whose verified `auth_time` is older than the window | `401` with `reauthentication_required`; nothing deleted |
+| *(deferred)* Delete-account without recent reauthentication | Valid token whose maximum verified `amr[].timestamp` is older than the window | `401` with `reauthentication_required`; nothing deleted |
 | *(deferred)* **Refresh does not reset the window** | Authenticate, wait past the window, force a token refresh, then call delete with the fresh token | `401 reauthentication_required`. This is the test that would have caught the revision-2 error, and it is the single most important case in this family |
-| *(deferred)* **`amr` alone is not accepted as recency** | Token whose `amr` lists `password` but whose `auth_time` is outside the window | `401`. Asserts the method check and the recency check are independent |
+| *(deferred)* **`amr` membership alone is not accepted as recency** | Token whose `amr` lists `password` but whose timestamp is outside the window | `401`. Asserts the method check and the recency check are independent (see also Family 2a) |
 | *(deferred)* Reauthentication reopens the window | Authenticate, wait past the window, reauthenticate, call delete | Succeeds |
-| *(deferred)* Missing or malformed `auth_time` | Token constructed without the claim | `401` — fails closed, never defaults to "recent" |
-| *(deferred)* Future-dated `auth_time` | Claim set beyond tolerance ahead of server time | `401` |
+| *(deferred)* Missing or malformed timestamp | `amr` absent, empty, or carrying a non-numeric `timestamp` | `401` — fails closed, never defaults to "recent" (see Family 2a case 2) |
+| *(deferred)* Future-dated timestamp | `amr[].timestamp` beyond clock-skew tolerance ahead of server time | `401` (see Family 2a case 3) |
 | *(deferred)* Delete-account from a foreign origin | Request with a disallowed `Origin` header | Rejected by CORS and by the function |
 | Cross-origin calls generally | Any browser-based call from an origin not on the allow-list | Blocked |
 
@@ -904,10 +959,63 @@ Four named families, each with concrete cases and an explicit pass condition. Th
 
 Email already registered; weak or mismatched passwords; very long inputs and unusual characters (including emoji and right-to-left text) in display names; double-clicking submit; expired or reused links; verification link opened on a different device or in a different browser (C.2); mail scanners consuming one-time links; session expiring while a form is open; logging out in one tab while another is open; two tabs refreshing a token simultaneously; offline or failing network; slow connection; rate limit reached; email bounces; clock skew between client and server. *(Deferred: deleting an account while logged in elsewhere; first-admin bootstrap.)*
 
+### H.6 How database tests run (approved revision 5)
+
+The pgTAP suite is a **required CI check** (H.5), and H.1 originally assumed a
+disposable local database. The Supabase Cloud decision removed it. This section
+records the approved replacement.
+
+**Decision: a pinned PostgreSQL service container in GitHub Actions.**
+
+A clarification that makes this possible: A.5 removed Docker as a **developer
+machine** dependency. GitHub Actions runners ship with Docker already, so a
+service container in CI reintroduces nothing for anyone working on this project.
+
+**Why this and not the alternatives**
+
+| Rejected option | Reason |
+| --- | --- |
+| A second hosted Supabase project for CI | A CI-only project is idle by definition and **pauses on the free tier after about a week**, so the required check would fail for reasons unrelated to any change. It also consumes the free tier's second project slot, pushing production onto a paid plan, and requires a secret key in CI |
+| The existing development project | No isolation. Concurrent pull requests would interleave role creation and row inserts against **the database we develop against**, producing failures that look real and do not reproduce. Also requires a secret key in CI |
+| Manual testing for now | Contradicts checklist item 14 and H.5. GRANT and RLS mistakes **fail silently** — they yield working software with a hole — and E.2 establishes that these two controls are the only thing limiting a one-hour post-sign-out token window |
+
+**Conditions of approval — all binding**
+
+1. **Pin `supabase/postgres` to an exact version.** Not `latest`, not a tag that
+   moves. Use the Supabase image rather than stock `postgres` so extensions and
+   base roles match.
+2. **Bootstrap SQL and migrations are version-controlled** in `supabase/`, and
+   reviewed like any other code.
+3. **Recreate the required Supabase roles, schemas and helper functions** in the
+   bootstrap: `anon`, `authenticated`, `service_role`, the `auth` schema, and the
+   `auth.uid()` / `auth.jwt()` / `auth.role()` helpers that policies depend on.
+4. **GRANT and RLS tests are required CI checks.** A pull request failing them
+   cannot merge.
+5. **A documented periodic parity test** against the Supabase Cloud development
+   project, run deliberately rather than on every pull request, to catch drift
+   between the reconstruction and the real platform.
+6. **No Supabase secret or service-role key in GitHub Actions.** This is what the
+   chosen option buys: the CI database is disposable and local to the run, so
+   there is no credential to leak from a public repository.
+7. **The development database is never the target of per-PR test runs.**
+
+**The residual risk this does not remove: parity drift.** The CI database is a
+reconstruction. If its roles or helper functions diverge from Supabase's, a test
+could pass in CI and the policy still be wrong in production. Condition 1
+constrains it, condition 5 detects it, and neither eliminates it. This is stated
+plainly rather than buried, and it is the reason the parity test is a condition
+rather than a nicety.
+
+**A tension worth naming.** A developer wishing to run pgTAP *locally* would need
+Docker, which is contrary to A.5's spirit though not its letter — A.5 removed
+Docker as a requirement, not as a possibility. Mitigation: CI is the enforcement
+point, and anyone wanting a local run can point `psql` at the development project
+with pgTAP enabled instead, needing no Docker.
+
 ### H.5 Process
 
 - Tests run locally with every change and automatically through GitHub Actions on every pull request.
-- The pgTAP grant-and-RLS suite and the API-level security suite are **required checks** — a pull request that fails them cannot merge, because these are the tests that fail silently in production if we skip them.
+- The pgTAP grant-and-RLS suite and the API-level security suite are **required checks** — a pull request that fails them cannot merge, because these are the tests that fail silently in production if we skip them. The pgTAP suite runs against a pinned PostgreSQL service container, never against the development project (H.6).
 - Manual checks are performed against the locally served app pointed at the cloud development project. Preview-deployment checks return if and when hosting is introduced.
 - Each milestone ends with: what was tested, what passed, what failed, and what remains untested.
 
@@ -921,7 +1029,7 @@ Reordered so that the core authentication module is complete and tested before a
 | --- | --- |
 | 1 | Architecture and planning (this document) |
 | 2 | Project setup: Vite and React, Tailwind v4, feature-based structure, Supabase client with explicit PKCE configuration, Supabase Cloud development project, environment variables, Git/GitHub and CI, test harness, token-claim investigation, setup and security documentation. **No Docker, no local Supabase, no deployment** |
-| 3 | Database foundation: `profiles`, the new-user trigger, **grants and RLS together in one migration**, and the pgTAP suite for both gates |
+| 3 | Database foundation: `profiles`, the new-user trigger, **grants and RLS together in one migration**, and the pgTAP suite for both gates — executed against a pinned PostgreSQL service container in GitHub Actions (H.6) |
 | 4 | Registration, email verification, login, logout, session handling, and the exact callback/PKCE behaviour in C.9 |
 | 5 | Forgot and reset password, including the `PASSWORD_RECOVERY` gate |
 | 6 | Protected routes, route guards, and the loading-state rules |
@@ -950,20 +1058,22 @@ Items already settled by your review are marked **[confirmed]** and need no furt
 - [ ] **5. Router:** React Router for page navigation (recommended).
 - [ ] **6. Session flow:** PKCE with browser storage and an XSS-focused mitigation plan, instead of a server-rendered cookie setup (recommended for simplicity).
 - [ ] **7. Email link style:** PKCE code links by default, with cross-device failure handled as a clear error plus resend; token-hash links (`verifyOtp`) with a custom template as the fallback if users hit it often (Section C.2). Confirm, or ask for token-hash from the start.
-- [ ] **8. Password policy:** minimum 8 characters initially (10 or more preferred), no forced complexity rules, **plus Supabase's leaked-password check enabled** (recommended).
+- [x] **8. Password policy:** **minimum 10 characters**, no forced complexity rules. Applied and verified 2026-11-06. **Supabase's leaked-password check could NOT be enabled — it is paid-plan only (E.1). Recorded as an unmet production security requirement, not as satisfied.** **[confirmed by your review]**
 - [ ] **9. Profile fields:** `display_name` and `avatar_url` only. Confirm, or tell me what else you need — noting that anything mirrored from `auth.users`, especially email, needs a deliberate decision (Section D.2).
 - [ ] **10. Production email:** Supabase's default sender during development, a custom SMTP provider before launch (recommended). Which provider, if any, do you have in mind?
 - [x] **11. Environments:** **Supabase Cloud** for all backend services, with a dedicated **development project** and the React frontend running locally at `localhost:5173`. A separate production project is created when deployment is addressed. **Docker is not a project dependency**, and there is no local Supabase stack (A.5). **[confirmed by your review]**
 - [x] **22. Frontend deployment:** **deferred.** No hosting is configured and no production frontend is deployed in the current plan. **The security headers in E.6 are deferred with it and must be configured when deployment happens** — tracked as Milestone 14. **[confirmed by your review]**
 - [ ] **12. Sign out of all devices:** include in Security Settings now, or defer?
-- [ ] **13. Testing toolset:** Vitest, React Testing Library, pgTAP and Playwright, plus a scripted HTTP layer for the H.3 security families (recommended).
+- [x] **13. Testing toolset:** Vitest, React Testing Library, pgTAP and Playwright, plus a scripted HTTP layer for the H.3 security families. Installed and proven in Milestone 2. **pgTAP executes against a pinned PostgreSQL service container in GitHub Actions, with no Supabase credential in CI (H.6).** **[confirmed by your review]**
 - [ ] **14. Security process rule:** no table is merged without RLS, grants and pgTAP tests for both gates in the same migration; the pgTAP and API-level security suites are required CI checks (recommended, and the condition on which Section E.5's safety guarantee rests).
 - [ ] **15. Revised milestone roadmap:** approve the reordering above (database before flows, deferred features after Milestone 8), or tell me what to change.
 - [x] **16. Scope:** admin panel, role management, account deletion, MFA and social login deferred; architecture kept extensible. **[confirmed by your review]**
 - [x] **17. Account deletion design:** reauthentication through Supabase Auth; no password ever reaches an Edge Function; the function verifies the token and deletes only the caller. **[confirmed by your review]**
 - [x] **18. Admin data access:** `profiles` never exposes `auth.users`; future admin reads go through an authorized server-side operation. **[confirmed by your review]**
 - [x] **19. Account deletion semantics:** **permanent hard delete**, with cascade removal of profile and role rows and no recovery path, on the basis that no retention requirements apply. Soft delete remains an additive change if that ever changes (Section C.8). **[confirmed by your review]**
-- [x] **21. Recent-authentication window:** measured against the verified `auth_time` claim, **5 minutes** for account deletion, as an initial proposal subject to verification against real Supabase token and session behaviour in Milestone 2; `amr` used for method only (Section C.8.1). **[confirmed by your review]**
+- [x] **21. Recent-authentication window:** **5 minutes** for account deletion, measured against the **maximum verified `amr[].timestamp`**. `amr` *membership* is used for method only and is never a recency signal.
+
+  *Revised in revision 5.* Revision 4 specified `auth_time`; **Supabase does not emit that claim** (verified 2026-11-06). The approved ordering is now: (1) `amr[].timestamp` — measured and confirmed to hold steady across refresh and advance on reauthentication; (2) server-side session inspection via the Admin API as optional defence-in-depth; (3) a Custom Access Token hook, ranked last because it would run on every token issue for every user. See C.8.1. **[confirmed by your review, revision 5]**
 - [ ] **20. Roles (still open, needed before Milestone 10):** two roles, `user` and `admin`, in a separate `user_roles` table. Will you need more, such as `moderator`?
 
 ---
