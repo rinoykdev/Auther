@@ -18,6 +18,13 @@ describe('AppRoutes', () => {
     ).toBeInTheDocument()
   })
 
+  it('renders the sign-up screen at /signup', () => {
+    renderAt('/signup')
+    expect(
+      screen.getByRole('heading', { name: /create your account/i }),
+    ).toBeInTheDocument()
+  })
+
   it('renders the forbidden page at /forbidden', () => {
     renderAt('/forbidden')
     expect(
