@@ -5,8 +5,15 @@ on:
   push:
     branches: [main]
 
-# No Docker, no service containers. This project has no local backend
-# (architecture A.5) and the runner needs nothing but Node.
+# A.5 removed Docker as a DEVELOPER-MACHINE dependency. GitHub Actions runners
+# ship with Docker already, so the `database` job below runs a disposable
+# PostgreSQL service container without reintroducing anything for anyone
+# working on this project (architecture H.6).
+#
+# NO SUPABASE CREDENTIAL OF ANY KIND BELONGS IN THIS FILE. The database job
+# exists precisely so that grants and RLS can be proven without one. If a
+# change appears to need a Supabase key here, that is the signal to re-read
+# H.6, not to add the secret.
 jobs:
   verify:
     name: Lint, build, test
@@ -100,3 +107,101 @@ jobs:
             exit 1
           fi
           echo "OK: history clean"
+
+  database:
+    name: Database — GRANTs and RLS
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # PINNED to an exact version (H.6 condition 1, decision O6). Never
+        # `latest` and never a tag that moves: the whole value of this job is
+        # that a green result means the same thing next month.
+        #
+        # The Supabase image rather than stock postgres, so extensions and base
+        # roles match the platform we deploy to.
+        image: supabase/postgres:17.11.0.007
+        env:
+          # Ephemeral, local to this run, and reachable only from this job.
+          # Not a secret in any meaningful sense, and not a Supabase credential.
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+      # Fail the step on the FIRST error rather than running on and reporting
+      # success at the end. Without this, a broken migration looks like a pass.
+      PSQL: psql -v ON_ERROR_STOP=1 --no-psqlrc --quiet
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql and pg_prove
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client libtap-parser-sourcehandler-pgtap-perl
+
+      - name: Bootstrap the reconstruction
+        run: |
+          set -euo pipefail
+          for f in supabase/bootstrap/*.sql; do
+            echo "-- $f"
+            $PSQL -f "$f"
+          done
+
+      - name: Apply migrations
+        run: |
+          set -euo pipefail
+          for f in supabase/migrations/*.sql; do
+            case "$f" in *.down.sql) continue;; esac
+            echo "-- $f"
+            $PSQL -f "$f"
+          done
+
+      - name: Run pgTAP
+        run: pg_prove --verbose supabase/tests/*.sql
+
+      # H.6.1 / plan §8. An untested rollback is a rollback that fails the
+      # first time it is needed, which is also the worst possible moment.
+      - name: Rehearse the rollback
+        run: |
+          set -euo pipefail
+          $PSQL -f supabase/migrations/0001_profiles_and_roles.down.sql
+
+          remaining=$($PSQL -tAc "select count(*) from pg_tables where schemaname='public'")
+          if [ "$remaining" != "0" ]; then
+            echo "::error::Rollback left $remaining table(s) in public."
+            exit 1
+          fi
+          echo "OK: rollback returned public to its bootstrap state"
+
+          # Re-apply and re-run: a rollback that cannot be undone is not a
+          # rollback, it is a one-way door.
+          $PSQL -f supabase/migrations/0001_profiles_and_roles.sql
+          pg_prove supabase/tests/*.sql
+          echo "OK: re-applied cleanly and the suite still passes"
+
+      - name: Collect the catalogue snapshot for the parity check
+        run: |
+          set -euo pipefail
+          $PSQL -f supabase/parity/collect.sql > parity-ci.txt
+          echo "Collected $(wc -l < parity-ci.txt) catalogue lines"
+
+      # The CI half of the H.6.1 diff. The cloud half is produced by the owner
+      # from a local shell, because it needs privileged read access that must
+      # never enter CI (H.6 condition 6).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parity-ci
+          path: parity-ci.txt
