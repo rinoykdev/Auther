@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+# Action versions: v5 across the board. v4 runs on Node 20, which GitHub has
+# deprecated and now force-runs on Node 24 with a warning on every run; v5 is
+# the release that moved to Node 24 properly. v6 and v7 exist for all three
+# actions, but jumping two further majors means absorbing behaviour changes
+# that have nothing to do with the warning being fixed. Revisit deliberately,
+# not under deprecation pressure.
+#
 # A.5 removed Docker as a DEVELOPER-MACHINE dependency. GitHub Actions runners
 # ship with Docker already, so the `database` job below runs a disposable
 # PostgreSQL service container without reintroducing anything for anyone
@@ -20,13 +27,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Full history so the secret scan can inspect every commit, not just
           # the tip. A key committed three commits ago is still a leaked key.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -59,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -165,7 +172,7 @@ jobs:
       PSQL: psql -v ON_ERROR_STOP=1 --no-psqlrc --quiet
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Start PostgreSQL and install pgTAP
         run: |
@@ -263,7 +270,7 @@ jobs:
       # The CI half of the H.6.1 diff. The cloud half is produced by the owner
       # from a local shell, because it needs privileged read access that must
       # never enter CI (H.6 condition 6).
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: parity-ci
           path: parity-ci.txt
