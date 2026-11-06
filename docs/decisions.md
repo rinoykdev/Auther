@@ -214,6 +214,58 @@ local shell. **No Supabase credential enters GitHub Actions** (H.6 condition 6).
 PostgREST's own behaviour is outside it. The API-level suite against the real
 cloud project is the complement.
 
+### D17 — Signup is four fields, and the confirm password never leaves the browser · **approved**, revision 7
+Full name, email, password, confirm password. The confirm value is a typo guard
+compared client-side and discarded; sending it would imply a server-side check
+that does not exist. Full name populates `display_name` — the column keeps that
+name because the value is editable afterwards, so it is chosen presentation, not
+verified identity (D.2).
+
+*Carries a cross-milestone risk:* the trigger reads the metadata key
+`display_name` and Milestone 4's form must send it. A mismatch raises no error and
+gives every user the fallback name.
+
+### D18 — No application access before email verification, enforced by Supabase Auth alone · **approved**, revision 7
+"Confirm email" is on, so `signUp` returns **no session**. No token means no
+request reaches PostgREST or an Edge Function. `ProtectedRoute` is user experience;
+RLS is a real boundary but not this one — it never meets an unconfirmed user.
+
+*The trap recorded with it:* `user_metadata.email_verified` sits in a part of the
+token the user can write through `updateUser`. Whether Supabase protects that key
+is **unverified**, and the design does not depend on the answer: **no
+authorization decision reads it.** A test asserts the claim grants nothing, which
+holds whichever way the behaviour falls (C.1.1, H.3 Family 2).
+
+### D19 — Every new user gets `user`; nothing in this application grants `admin` · **approved**, revision 7
+The trigger writes the role as a **literal**, with no branch producing `admin` —
+specifically no "first user" branch, which is how requirement 9 is usually lost.
+The client role holds **no write privilege on `user_roles` at all**, so the
+restriction holds at the grant gate, independently of any policy.
+
+Admin is provisioned out of band: register normally, confirm the email, then one
+explicit `insert` by the owner using database credentials the application does not
+possess, recorded with `granted_by` (D.7.1). A feature that creates the first
+admin must be reachable by someone who is not yet an admin — a
+privilege-escalation path with a friendly label.
+
+### R1 — `user_roles` moves into Milestone 3 · **proposed**, revision 7 ⚠️ *awaiting approval; changes milestone scope*
+
+Requirements 8–10 are security properties. **Requirement 9 — the first registered
+user is not an admin — cannot be tested unless roles are a real object**: with an
+implicit default there is nothing to assert against, and the property holds only
+because no mechanism exists yet, which is true right up until someone adds one.
+
+*Brought forward:* the table, the enum, its grants, its policy, and the
+default-role half of the trigger. *Staying in Milestone 10:* `has_role`,
+`RoleGuard`, the admin panel, and any third role.
+
+*Secondary reason:* adding the table later means a backfill migration for every
+existing user plus a change to a trigger that is by then in the live sign-up path.
+
+*If declined:* requirement 8 is met by absence ("no admin row" means `user`),
+requirement 9 becomes untestable, and §4.5 plus `045_default_role.sql` drop out of
+the plan. Nothing else changes.
+
 ---
 
 ## Still open
@@ -226,3 +278,5 @@ cloud project is the complement.
 | O4 | Additional roles beyond `user` / `admin` | Milestone 10 | |
 | O5 | Deployment target and the E.6 headers | Milestone 14 | Deferred by D2 |
 | O6 | Pinned `supabase/postgres` image version for CI | **Milestone 3, before the workflow is written** | H.6 condition 1 requires an exact version. Which version is a Milestone 3 decision, recorded here so it is chosen rather than defaulted |
+| O7 | **R1 — `user_roles` in Milestone 3?** | **Before Milestone 3 begins** | The only scope change in revision 7. Recommended; see R1 above |
+| O8 | A third role beyond `user` / `admin` | **Before the `app_role` enum is created** (Milestone 3) | Free to add to a table that does not exist; a migration and a policy review afterwards. Checklist item 20 |

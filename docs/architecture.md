@@ -76,6 +76,27 @@ expire.
 | 2 | **The parity check becomes an operational procedure** — five triggers, four comparison categories, an empty diff as the only pass, and an ordered failure procedure. Required before production release and whenever the bootstrap changes | New H.6.1, H.6 condition 5, D16 |
 | 3 | **D12 stays open on a production release gate.** Credential-stuffing protection is not satisfied and may not be recorded as such — not by documentation, a longer minimum length, or a client-side check | `security.md`, checklist item 8, D12 |
 
+### Added in revision 7 — the complete signup flow
+
+Login and Sign Up are now specified as a pair, and the registration flow is
+written end to end: four fields, the automatic profile row, mandatory email
+confirmation, and the default role every new user receives.
+
+| # | Change | Where |
+| --- | --- | --- |
+| 1 | Sign Up and Login link to each other; both are specified screens with `PublicOnlyRoute` | F screens 1 and 4 |
+| 2 | Sign Up fields fixed at **full name, email, password, confirm password** | C.1, F screen 1 |
+| 3 | Registration rewritten end to end — what Supabase does, what the trigger does, what the client receives (**no session**) | C.1 |
+| 4 | **New C.1.1** — why there is no application access before verification, where that is actually enforced, and the claim that must never be trusted for it | C.1.1 |
+| 5 | **Every new user receives the default `user` role, assigned by the trigger.** The first registered user is **not** an admin, and no code path can make one | D.4, D.7, C.1 |
+| 6 | Admin provisioning is a documented out-of-band process, never an application feature | D.7.1 |
+| 7 | `user_roles` moves **forward into Milestone 3** — proposed, pending your approval as decision **R1** | D.7, `milestone-3-plan.md` §4.5 |
+
+**R1 is the one decision in this revision that changes scope.** Requirements 8–10
+are security properties, and a security property with no object to assert against
+cannot be tested. The alternative — leaving the default role implicit — is set out
+with its costs in `milestone-3-plan.md` §4.5.
+
 ---
 
 ## How to read this document
@@ -319,16 +340,88 @@ For each flow: what the user sees, what React does, what Supabase does, and what
 
 ### C.1 Registration
 
-1. User opens **Sign Up** and enters email, password and (optionally) display name.
-2. React validates format and password rules for instant feedback.
-3. React calls `signUp` (via `authService`), passing the email, password, display name and the `emailRedirectTo` URL where the confirmation link should land.
-4. Supabase Auth creates the user in `auth.users` with the status **unconfirmed**, hashes the password, and sends a confirmation email.
-5. A database trigger (planned, not yet created) automatically creates a matching row in our `profiles` table.
-6. React shows the **Check Your Email** screen, with a "Resend email" button and a cooldown timer.
+**Fields: full name, email, password, confirm password.** Four, and no more.
+Everything else a profile might carry is editable later on the Profile screen; a
+registration form is the worst place to ask for anything optional.
+
+1. User opens **Sign Up** — reachable from the Login screen's "Create an account"
+   link — and enters the four fields.
+2. React validates client-side for instant feedback only: email format, the
+   10-character minimum (checklist item 8), and that the two passwords match.
+   **Confirm-password is never sent anywhere.** It is a typo guard, compared in
+   the browser and then discarded; sending it would imply the server checks it,
+   which it does not.
+3. React calls `signUp` (via `authService`) with the email, the password, the
+   `emailRedirectTo` callback URL, and the full name in `options.data`, which
+   Supabase stores as `raw_user_meta_data`.
+4. Supabase Auth creates the row in `auth.users` as **unconfirmed**, hashes the
+   password (we never see or store it), and sends the confirmation email.
+5. **The database trigger fires** (D.4), creating the matching `profiles` row
+   from `raw_user_meta_data`, and the `user_roles` row granting the default
+   **`user`** role. Both happen server-side, inside the same transaction as the
+   user insert; the client cannot skip, alter or race them.
+6. **Supabase returns a user but no session** — this is what makes requirement 7
+   true, and it is covered in C.1.1.
+7. React shows **Check Your Email**, with a resend button and a cooldown timer.
+
+**The role is assigned here, and it is always `user`.** The trigger writes a
+literal. It does not read a role from `raw_user_meta_data`, from the request, or
+from anywhere else the client can influence, and it contains no branch that could
+produce `admin` — not for the first user, not for any user. The first
+administrator is created out of band (D.7.1). **There is no code path in this
+application that grants `admin`.**
+
+**A row exists before confirmation.** `profiles` and `user_roles` rows are created
+at sign-up, not at confirmation, because the trigger is on insert into
+`auth.users`. Abandoned sign-ups therefore leave rows behind. This is harmless —
+those users never obtain a session, so nothing can read the rows, and the cascade
+in D.3 removes them with the user — but it is stated so it is not later mistaken
+for a bug.
+
+*Edge cases:* email already registered (we must not reveal whether an account exists — see Sections E.6 and H.3); weak password; passwords do not match; network failure after the user row is created but before the email is sent; user closes the tab before confirming; email goes to spam.
 
 *Edge cases:* email already registered (we must not reveal whether an account exists — see Sections E.6 and H.3); weak password; network failure; user closes the tab before confirming; email goes to spam.
 
 *Note on enumeration:* with "Confirm email" enabled, Supabase's `signUp` response for an already-registered address is deliberately shaped to look like a new registration (an obfuscated user object, no session). Our UI must not add information back by behaving differently. This is tested explicitly in H.3.
+
+**The metadata key must match on both sides.** `signUp` sends the name under a
+key we choose; the trigger reads that exact key. A mismatch is silent — every new
+user simply gets the fallback name, no error is raised anywhere, and it surfaces
+weeks later as "why is everyone called New user". The key is `display_name`, it is
+written in one place in `authService`, and a test asserts a real `signUp` produces
+the name the caller passed (H.2).
+
+### C.1.1 No application access before verification
+
+Requirement 7 — a registered user gets nothing until the email is verified. Worth
+being precise about *where* that is enforced, because three mechanisms look like
+the enforcement point and only one is.
+
+| Layer | What it does | Is it the boundary? |
+| --- | --- | --- |
+| **Supabase Auth, "Confirm email" enabled** | `signUp` returns a user and **`session: null`**. No access token is issued at all, and `signInWithPassword` refuses an unconfirmed account | **Yes.** No token means no PostgREST request, no Edge Function call, nothing. This is the whole of the protection |
+| `ProtectedRoute` in React | Redirects a visitor with no session to Login | **No — user experience only.** It runs in code the user controls |
+| `profiles` / `user_roles` RLS | `(select auth.uid()) = id` | **No.** It is a real boundary, but not *this* one — it never sees an unconfirmed user, because such a user has no token to present |
+
+The rows created in step 5 are therefore unreachable until confirmation, not
+because a policy excludes unconfirmed users, but because their owner cannot
+authenticate at all.
+
+**The claim that must never be trusted for this.** The JWT carries
+`user_metadata.email_verified` — and `user_metadata` is the one part of the token
+a user can write to, through `updateUser({ data: … })`. Whether Supabase protects
+this particular key is **not something we have verified**, and the design does not
+depend on the answer: **no authorization decision anywhere reads
+`user_metadata.email_verified`.** If a confirmation state is ever needed
+server-side, it is read from `auth.users.email_confirmed_at` through the
+authorized path in D.6. H.3 Family 2 gains a test that attempts to set the claim
+and asserts it grants nothing, which is the assertion that holds whichever way the
+underlying behaviour falls.
+
+**One case where a session and an unverified address coexist**: changing an email
+address on an existing account (C.7). The session is valid throughout and the new
+address is unverified until confirmed. That is a Milestone 7 concern, recorded
+here so it is not assumed to be covered by requirement 7.
 
 ### C.2 Email verification and the auth callback
 
@@ -561,11 +654,26 @@ Supabase Auth maintains its own `auth.users` table (email, hashed password, conf
 | Field | Purpose |
 | --- | --- |
 | `id` (UUID, primary key) | Same value as `auth.users.id`; foreign key with ON DELETE CASCADE |
-| `display_name` | Name shown in the UI |
+| `display_name` | Name shown in the UI. Populated from the **Full name** field at sign-up (see the naming note below) |
 | `avatar_url` | Optional; image storage is deferred |
 | `created_at`, `updated_at` | Timestamps (updated automatically by a trigger) |
 
 We keep the profile separate from `auth.users` because we should not change Supabase's internal table, and because the profile is the safe place to attach app-specific fields that the client may read and edit.
+
+**Naming note, revision 7 — "Full name" in the UI, `display_name` in the column.**
+The sign-up form asks for a full name; the column it lands in stays
+`display_name`, which is how E.4's column grant, F screen 7 and every existing
+reference already name it. The mismatch is deliberate and worth one sentence:
+the field is *seeded* with a full name and is **editable thereafter**, so what the
+column actually holds is whatever the user chose to be called. Naming it
+`full_name` would assert a legal-ish identity the application never verifies and
+the user can change in the Profile screen.
+
+This matters once more than the user's own eyes can see it. The initial policy is
+own-row-only, so nothing is disclosed today. If a later feature lets users see one
+another's names, a *full* name is a larger disclosure than a chosen one — and the
+column being `display_name` is the reminder that the value is user-controlled
+presentation, not identity.
 
 **What `profiles` must never contain — stated explicitly in this revision:**
 
@@ -582,14 +690,27 @@ We keep the profile separate from `auth.users` because we should not change Supa
 ```
 auth.users (managed by Supabase)
    |-- 1 to 1  --> public.profiles   (profiles.id = auth.users.id)
-   |-- 1 to many --> public.user_roles (deferred; user_roles.user_id)
+   |-- 1 to many --> public.user_roles (Milestone 3; user_roles.user_id)
 ```
 
 Deleting a user in `auth.users` automatically deletes their profile (cascade), which is how account deletion stays clean when that milestone arrives.
 
 ### D.4 Database automation planned
 
-- **Trigger on new user:** when a row appears in `auth.users`, create the matching `profiles` row. This runs server-side as a `SECURITY DEFINER` function so it cannot be skipped by a malicious client. Two details we will get right in the migration: a fixed `search_path` on the function (an unqualified `search_path` in a definer function is a known privilege-escalation vector), and the function being owned by a role that has exactly the privileges it needs and no more.
+- **Trigger on new user:** when a row appears in `auth.users`, create the matching `profiles` row **and the `user_roles` row granting the default `user` role** (revision 7, requirement 8). This runs server-side as a `SECURITY DEFINER` function so it cannot be skipped by a malicious client. Two details we will get right in the migration: a fixed `search_path` on the function (an unqualified `search_path` in a definer function is a known privilege-escalation vector), and the function being owned by a role that has exactly the privileges it needs and no more.
+
+  **The role value is a literal in the function body.** It is not read from
+  `raw_user_meta_data`, not from the request, not from a column default a client
+  could influence. The function has **no branch producing `admin`** — notably no
+  "if this is the first user" branch, which is the usual shape of requirement 9
+  being violated by a convenience. Asserted by test, not by inspection: a sign-up
+  into an **empty** database must yield exactly `user` (H.3 Family 2).
+
+  **The trigger must not be able to block registration.** It runs inside the
+  `auth.users` insert transaction, so an exception raised here aborts the sign-up
+  and surfaces in Milestone 4 as an authentication bug with no obvious cause.
+  Both inserts therefore use `on conflict do nothing` and depend on no optional
+  metadata; a user who supplies no name still gets both rows.
 - **Trigger for `updated_at`.**
 - **Helper function for roles** (`has_role`): deferred with the roles feature; designed in D.7.
 
@@ -611,9 +732,28 @@ When that milestone arrives, admin reads of authentication data will go through 
 
 The key property: the capability to read authentication data exists **only** inside code that has already proved the caller is an admin. There is no table, view or policy that could be made to leak it by a mistake in an RLS predicate, because the data is never reachable from the client's database role at all.
 
-### D.7 Role design (deferred; design retained in full)
+### D.7 Role design (table brought forward to Milestone 3 — revision 7)
 
-Not built in the initial implementation. Recorded here so the later addition is mechanical.
+**What changed.** Revision 6 and earlier deferred this entire section to Milestone
+10. Requirements 8–10 moved the *table and the trigger* forward; everything that
+*uses* roles — `has_role`, `RoleGuard`, the admin panel — stays in Milestone 10.
+
+**Why the table could not stay deferred.** Requirement 9 says the first registered
+user must not become an admin. That is a security property, and a security
+property with nothing to assert against cannot be tested — only hoped for. With
+`user_roles` present from the first migration, "sign up into an empty database and
+assert the result is exactly `user`" is a test that runs in CI on every pull
+request. Without it, the same requirement is a sentence in a document.
+
+The second reason is cheaper but real: adding the table later means a backfill
+migration for every existing user plus a change to a trigger that by then is in
+the live sign-up path. Creating it alongside `profiles` costs one extra table in a
+migration that is already being written and reviewed.
+
+**Scope discipline, stated plainly.** This is the one place where Milestone 3
+takes on work previously assigned to Milestone 10, and it does so because you
+asked for requirements 8–10 now. It is **decision R1** in the Milestone 3 plan and
+is not implemented until you approve it.
 
 **`user_roles`**: which roles each user has.
 
@@ -632,7 +772,41 @@ Not built in the initial implementation. Recorded here so the later addition is 
 
 **First admin** is created manually once, through a documented step, because letting the app create its first admin would itself be a security hole.
 
-**Roadmap position:** roles arrive with the admin milestone, after the core authentication flows have a passing test suite.
+**Roadmap position:** the **table, its grants, its policies and the trigger that
+populates it** arrive in Milestone 3 (revision 7). Everything that *reads* roles
+to make a decision — `has_role`, `RoleGuard`, the admin panel, and any additional
+role beyond `user` and `admin` — arrives with the admin milestone, after the core
+authentication flows have a passing test suite.
+
+### D.7.1 Admin provisioning (requirement 10)
+
+**Admin is never granted by this application.** There is no sign-up path, no
+settings toggle, no "first user" branch, no API, and no client-reachable write of
+any kind to `user_roles`. The client role holds **no `INSERT`, `UPDATE` or
+`DELETE` privilege on that table at all** (E.4), so the restriction survives a
+badly written policy: the attempt dies at the grant gate, which is the stronger of
+the two.
+
+**The trusted process, which is deliberately manual and out of band:**
+
+1. The account is registered through the ordinary public sign-up and the email
+   confirmed, so an administrator is a real, verified user first.
+2. The owner connects to the database with privileged credentials — the Supabase
+   dashboard SQL editor or `psql` with the secret key — **from outside the
+   application**.
+3. A single explicit `insert` grants `admin`, recording `granted_by` and
+   `granted_at` (the accountability columns exist for this).
+4. The action is recorded in the project log, with who did it and why.
+
+**Why manual, and why it stays manual.** A feature that creates the first admin is
+a feature that creates *an* admin, and it has to be reachable by someone who is
+not yet an admin — which is a privilege-escalation path with a friendly label.
+Doing this once by hand costs a few minutes; owning that code path costs forever.
+
+**Before this is used**, Milestone 10 must hold: `authenticated` has no write
+privilege on `user_roles`, no policy permits a client write, and promotion
+requires database credentials the application does not possess. The first two are
+tested from Milestone 3 onward.
 
 ### D.8 Deliberately deferred (to keep it simple)
 
@@ -679,7 +853,7 @@ Audit log table, avatar file storage, multi-factor authentication, social login,
 - Policies in the initial implementation:
   - `profiles`: a user may `SELECT` and `UPDATE` **only their own row** (`(select auth.uid()) = id`). No client `INSERT` (the trigger does it) and no client `DELETE` (cascade handles it).
 - Policies when roles are added (D.7):
-  - `user_roles`: a user may `SELECT` **only their own roles**. Nobody may `INSERT`, `UPDATE` or `DELETE` from the client.
+  - `user_roles` *(Milestone 3, revision 7)*: a user may `SELECT` **only their own roles**. Nobody may `INSERT`, `UPDATE` or `DELETE` from the client — and no such privilege is granted either, so the policy is the second of two refusals rather than the only one.
   - `profiles`: an additional admin read path, if and only if we conclude the admin screen cannot be served by the server-side path in D.6.
 - Policy-writing conventions we will follow: wrap `auth.uid()` as `(select auth.uid())` so the planner treats it as a constant rather than re-evaluating per row; write **separate policies per command** (`FOR SELECT`, `FOR UPDATE`) rather than one `FOR ALL`, so each is readable and testable in isolation; always pair an `UPDATE` policy's `USING` clause with a `WITH CHECK` clause, because without `WITH CHECK` a user could update their row into a state that no longer satisfies the policy.
 - Frontend checks (`ProtectedRoute`, and later `RoleGuard`) are for user experience only. They are never the security boundary.
@@ -704,7 +878,7 @@ Step 3 is the one we design policies for. Steps 1 and 2 are the ones that get fo
 | --- | --- | --- | --- |
 | schema `public` | `USAGE` | `USAGE` | Required for anything to be reachable |
 | `public.profiles` | none | `SELECT`; `UPDATE` **on `display_name`, `avatar_url` only** | No `INSERT` (trigger), no `DELETE` (cascade). Column-level `UPDATE` means `id`, `created_at` and any future sensitive column cannot be written even by a correct-looking request |
-| `public.user_roles` *(deferred)* | none | `SELECT` only | No write privilege exists for the client role at all |
+| `public.user_roles` *(Milestone 3, revision 7)* | none | `SELECT` only — own rows | **No `INSERT`, `UPDATE` or `DELETE` privilege exists for the client role at all.** This is what makes requirement 10 hold at the grant gate, independently of any policy. Promotion to `admin` requires database credentials the application does not have |
 | schema `auth`, all its tables | none | none | Unchanged from Supabase's defaults; we add nothing |
 | Future tables | none by default | granted explicitly, per table | See the default-privileges rule below |
 
@@ -772,10 +946,10 @@ Screens marked *(deferred)* are specified but not built in the initial implement
 
 | # | Screen | Route | Access | Key components | States and interactions |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Sign Up | `/signup` | Public only | Email, password (show/hide, strength hint), confirm password, display name, submit, link to Login | Validation errors, email already used (generic wording — see H.3), submitting, success leads to Check Email |
+| 1 | Sign Up | `/signup` | Public only | **Full name, email, password (show/hide), confirm password**, submit, **"Already have an account? Sign in" → `/login`** | Field validation, passwords do not match (checked in the browser; the confirm value is never sent), email already used (generic wording — see H.3), submitting, success leads to Check Email |
 | 2 | Check Your Email | `/check-email` | Public | Message, "Resend email" button, cooldown timer, "Change email" link | Resend sent, resend rate-limited, resend failed |
 | 3 | Auth Callback | `/auth/callback` | Public | Spinner, result message | Exchanging code, success → redirect; link expired/used → resend offer; **opened in a different browser → specific, non-alarming message plus resend** (C.2) |
-| 4 | Login | `/login` | Public only | Email, password, show/hide, "Forgot password?" link, submit, link to Sign Up | Wrong credentials (generic), unverified email (with resend), rate-limited, success redirects to the originally requested page |
+| 4 | Login | `/login` | Public only | Email, password, show/hide, "Forgot password?" link, submit, **"Create an account" → `/signup`** | Wrong credentials (generic), unverified email (with resend), rate-limited, success redirects to the originally requested page |
 | 5 | Forgot Password | `/forgot-password` | Public | Email field, submit, back to Login | Always the same "if an account exists" message |
 | 6 | Reset Password | `/reset-password` | **`PASSWORD_RECOVERY` event observed in this page load** (C.9 rule 2) | New password, confirm, submit | Invalid or expired link, weak password, success then redirect to Login |
 | 7 | Profile | `/profile` | Logged in | Display name field, email (read-only), save button, avatar placeholder | Loading profile, unsaved changes, save success, save error |
@@ -788,6 +962,14 @@ Screens marked *(deferred)* are specified but not built in the initial implement
 | 14 | Admin Panel *(deferred)* | `/admin` | Role: admin | User list, role assignment controls | Loading, empty, forbidden, role-change success or error. Data arrives from the authorized server-side operation in D.6, never from a client query over `auth.users` |
 
 **Shared components:** Button, TextInput, PasswordInput, Alert (error, success, info), Spinner, FormField (label, input, error text), Navbar with UserMenu, PageLayout, ProtectedRoute, PublicOnlyRoute, ConfirmDialog. `RoleGuard` is deferred.
+
+**Login and Sign Up are a pair (requirement 1).** Each links to the other, both
+sit behind `PublicOnlyRoute`, and they share the same layout and form components
+so the two screens cannot drift apart visually. The links are plain router
+navigations — no state is carried between them, and in particular a typed email is
+**not** forwarded from one to the other, since that would let a visitor learn from
+the destination screen's behaviour whether the address is registered (H.3 Family
+3).
 
 **Route guard behaviour:**
 
@@ -832,7 +1014,7 @@ Supabase automatically exposes the tables in our `public` schema to the `anon` a
 | Update own profile | `profiles` | Grant: `UPDATE` on `display_name`, `avatar_url` only. RLS: own row, with `WITH CHECK` |
 | Create profile | — | No client path; a `SECURITY DEFINER` trigger does it |
 | Delete profile | — | No client path; cascade from `auth.users` |
-| Read own roles *(deferred)* | `user_roles` | Grant: `SELECT` only. RLS: own rows only |
+| Read own roles | `user_roles` | Grant: `SELECT` only. RLS: own rows only. Table exists from Milestone 3; the *authorization decisions* that read it arrive in Milestone 10 |
 | Admin: list users with auth details *(deferred)* | — | **Not this layer.** See G.3 and D.6 |
 
 No custom backend is needed here, but this layer is only as safe as the grants and policies behind it, which is why both get dedicated tests.
@@ -888,7 +1070,11 @@ A note on why the API-level layer is listed separately: browser tests exercise t
 
 ### H.2 Functional tests (happy paths)
 
-Register then verify then login; forgot then reset then login with the new password; edit profile and see it persist after reload; change password and confirm the old one fails; change email and confirm both addresses receive mail; logout clears access; session restores across a page refresh without flashing the login screen; a second tab reflects logout.
+**Registration, in full (revision 7):** sign up with the four fields → assert
+`session` is `null` and no application resource is reachable → assert the
+`profiles` row exists with **the name that was typed**, not the fallback (the
+metadata-key mismatch in C.1) → assert the `user_roles` row is exactly `user` →
+confirm the email → log in → reach a protected resource. Then: register then verify then login; forgot then reset then login with the new password; edit profile and see it persist after reload; change password and confirm the old one fails; change email and confirm both addresses receive mail; logout clears access; session restores across a page refresh without flashing the login screen; a second tab reflects logout.
 
 *(Deferred features carry their own happy-path tests into their milestones: deletion removes user and profile and blocks login afterwards; an admin sees the panel and a normal user does not.)*
 
@@ -907,7 +1093,7 @@ Four named families, each with concrete cases and an explicit pass condition. Th
 | Anonymous writes any table | `insert`/`update`/`delete` attempts | Rejected |
 | A reads B's profile through a nested/embedded query | PostgREST resource embedding from any related table | Zero rows — embedding does not bypass RLS, and we prove it rather than assume it |
 | A reads auth data | Attempt to query `auth.users`, and any view or RPC that might expose it | Rejected / not found. Repeated as a schema test: no view or function in `public` references `auth.users` |
-| *(with roles)* A reads B's roles | `select` on `user_roles` for B | Zero rows |
+| A reads B's roles | `select` on `user_roles` for B | Zero rows — and A's own row *is* returned, proving the query shape was valid |
 
 **Family 2 — Privilege escalation (can a user gain power they were not given?)**
 
@@ -916,7 +1102,12 @@ Four named families, each with concrete cases and an explicit pass condition. Th
 | Self-promotion via profile write | `update profiles set` a role-ish column | Fails — and the stronger assertion: **no such column exists** (D.2) |
 | Self-promotion via `user_metadata` | `auth.updateUser({ data: { role: 'admin' } })`, then use the resulting token against every protected resource | The call may succeed (it is the user's own metadata) but **grants nothing**: every authorization check still refuses. Asserted explicitly, because this is the single most common Supabase mistake |
 | Forged role claim in the JWT | Hand-craft a token with `role: 'service_role'` and an invalid signature | Rejected at signature verification |
-| Direct write to the roles table *(with roles)* | `insert`/`update`/`delete` on `user_roles` with a user token | Rejected **at the grant gate** — asserted by checking `has_table_privilege` for `authenticated` returns false, independently of any policy |
+| Direct write to the roles table | `insert`/`update`/`delete` on `user_roles` with a user token | Rejected **at the grant gate** — asserted by checking `has_table_privilege` for `authenticated` returns false, independently of any policy |
+| **Default role is `user`** *(requirement 8)* | Insert a new user; read the resulting `user_roles` rows | Exactly one row, `role = 'user'`. Not zero (the trigger silently failed), not two |
+| **The first user is not an admin** *(requirement 9)* | Run the sign-up against an **empty** database — no users, no roles — and read the result | `role = 'user'`. Run a second time with one user already present and assert the same. The empty case is the one that matters: a "first user becomes admin" convenience is invisible in every other test |
+| **No code path grants `admin`** *(requirement 10)* | Static assertion over the trigger function body and every routine in `public`: no literal `'admin'` is written by any function reachable from a client action. Plus the grant-gate check above | No client-reachable path inserts or updates a role. Promotion requires database credentials the application does not hold |
+| **Role is not taken from client-supplied metadata** | `signUp` with `options.data = { role: 'admin' }`, and `updateUser({ data: { role: 'admin' } })` afterwards | The metadata may be stored (it is the user's own), but `user_roles` still reads `user`, and every authorization check refuses. The trigger must never read a role from `raw_user_meta_data` |
+| **`email_verified` in `user_metadata` grants nothing** *(C.1.1)* | `updateUser({ data: { email_verified: true } })` on an account, then exercise every protected resource | Authorization is unchanged. No decision anywhere reads this claim — asserted by test rather than by the absence of the string in our code |
 | Grant-gate regression | pgTAP assertion of the full privilege matrix in E.4 for `anon` and `authenticated` | Matches exactly; any new grant that appears without being added to the test fails the build |
 | RLS-enabled regression | Query `pg_tables` for any table in `public` with `rowsecurity = false` | Empty result. This one test catches every future table that forgets RLS |
 | `SECURITY DEFINER` audit | Enumerate definer functions; assert each has a fixed `search_path` and no `EXECUTE` grant to `public` | Passes for every function |
@@ -1141,7 +1332,7 @@ Reordered so that the core authentication module is complete and tested before a
 | --- | --- |
 | 1 | Architecture and planning (this document) |
 | 2 | Project setup: Vite and React, Tailwind v4, feature-based structure, Supabase client with explicit PKCE configuration, Supabase Cloud development project, environment variables, Git/GitHub and CI, test harness, token-claim investigation, setup and security documentation. **No Docker, no local Supabase, no deployment** |
-| 3 | Database foundation: `profiles`, the new-user trigger, **grants and RLS together in one migration**, and the pgTAP suite for both gates — executed against a pinned PostgreSQL service container in GitHub Actions (H.6) |
+| 3 | Database foundation: `profiles`, **`user_roles` with the default `user` role (revision 7, pending R1)**, the new-user trigger, **grants and RLS together in one migration**, and the pgTAP suite for both gates — executed against a pinned PostgreSQL service container in GitHub Actions (H.6) |
 | 4 | Registration, email verification, login, logout, session handling, and the exact callback/PKCE behaviour in C.9 |
 | 5 | Forgot and reset password, including the `PASSWORD_RECOVERY` gate |
 | 6 | Protected routes, route guards, and the loading-state rules |
@@ -1149,7 +1340,7 @@ Reordered so that the core authentication module is complete and tested before a
 | 8 | **Core hardening and full security test pass** (all four families in H.3), then deployment checklist. *The reusable core authentication module is complete and proven here.* |
 | 9 | Packaging the module for reuse in other apps |
 | — | *Deferred features begin only after Milestone 8 passes:* |
-| 10 | Roles and role-based authorization |
+| 10 | Role-based authorization: `has_role`, `RoleGuard`, admin-only paths, and any role beyond `user` / `admin`. **The table, its grants, its policies and the default-role trigger land in Milestone 3** (D.7) |
 | 11 | Admin panel, including the authorized server-side read path in D.6 |
 | 12 | Account deletion (reauthentication plus Edge Function, per C.8) |
 | 13 | Optional: MFA, social login, audit log, avatar storage |
@@ -1174,6 +1365,8 @@ Items already settled by your review are marked **[confirmed]** and need no furt
 
   **Credential-stuffing protection is therefore NOT satisfied, and D12 stays open on the production release gate (`security.md`) until it is.** It is not closed by being documented, by raising the password length, or by adding a client-side breach check. **[confirmed by your review; gate reaffirmed revision 6]**
 - [ ] **9. Profile fields:** `display_name` and `avatar_url` only. Confirm, or tell me what else you need — noting that anything mirrored from `auth.users`, especially email, needs a deliberate decision (Section D.2).
+
+  *Revision 7:* the Sign Up form's **Full name** field populates `display_name`. The column keeps its name because the value is editable afterwards and is therefore chosen presentation, not verified identity (D.2 naming note).
 - [ ] **10. Production email:** Supabase's default sender during development, a custom SMTP provider before launch (recommended). Which provider, if any, do you have in mind?
 - [x] **11. Environments:** **Supabase Cloud** for all backend services, with a dedicated **development project** and the React frontend running locally at `localhost:5173`. A separate production project is created when deployment is addressed. **Docker is not a project dependency**, and there is no local Supabase stack (A.5). **[confirmed by your review]**
 - [x] **22. Frontend deployment:** **deferred.** No hosting is configured and no production frontend is deployed in the current plan. **The security headers in E.6 are deferred with it and must be configured when deployment happens** — tracked as Milestone 14. **[confirmed by your review]**
@@ -1188,7 +1381,11 @@ Items already settled by your review are marked **[confirmed]** and need no furt
 - [x] **21. Recent-authentication window:** **5 minutes** for account deletion, measured against the **maximum verified `amr[].timestamp`**. `amr` *membership* is used for method only and is never a recency signal.
 
   *Revised in revision 5.* Revision 4 specified `auth_time`; **Supabase does not emit that claim** (verified 2026-11-06). The approved ordering is now: (1) `amr[].timestamp` — measured and confirmed to hold steady across refresh and advance on reauthentication; (2) server-side session inspection via the Admin API as optional defence-in-depth; (3) a Custom Access Token hook, ranked last because it would run on every token issue for every user. See C.8.1. **[confirmed by your review, revision 5]**
-- [ ] **20. Roles (still open, needed before Milestone 10):** two roles, `user` and `admin`, in a separate `user_roles` table. Will you need more, such as `moderator`?
+- [ ] **20. Roles:** two roles, `user` and `admin`, in a separate `user_roles` table. Will you need more, such as `moderator`?
+
+  *Revision 7 — now needed before **Milestone 3**, not Milestone 10.* Requirements 8–10 bring the table, its grants, its policies and the default-role trigger forward (D.7, decision **R1**). What stays in Milestone 10 is everything that *reads* a role to make a decision. **If you expect a third role, say so now** — adding one later is a migration plus a policy review, which is cheap, but adding one to a table that does not exist yet is free.
+
+- [ ] **23. Signup flow (revision 7):** four fields (full name, email, password, confirm password); Login and Sign Up cross-linked; email confirmation mandatory and no session issued until it is done; the trigger assigns the default `user` role; **no application code path grants `admin`**, and the first administrator is provisioned out of band (D.7.1). Confirm, or tell me what to change.
 
 ---
 
