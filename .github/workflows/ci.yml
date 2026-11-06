@@ -88,7 +88,14 @@ jobs:
           #   scan-dist.mjs     likewise — it is the dist scanner, so it
           #                     necessarily contains the strings it hunts.
           # Nothing else is excluded; a real secret cannot hide behind these.
-          if git grep -nE '(sb_secret_[A-Za-z0-9_-]{8,}|service_role|eyJ[A-Za-z0-9_-]{30,})' \
+          # NOTE on `service_role`: the bare string is a PostgreSQL role name,
+          # which supabase/*.sql legitimately writes (bootstrap, parity). The
+          # thing that must never appear is a service-role KEY, and a key is
+          # either a JWT (eyJ...) or sb_secret_... - both matched below on
+          # their own. Matching `service_role_key`-shaped variable names keeps
+          # the intent without flagging every GRANT statement. Excluding
+          # supabase/** instead would have let a real key hide there.
+          if git grep -niE '(sb_secret_[A-Za-z0-9_-]{8,}|service[_-]?role[_-]?key|eyJ[A-Za-z0-9_-]{30,})' \
                -- . ':(exclude)docs/**' ':(exclude).github/workflows/ci.yml' \
                     ':(exclude)scripts/scan-dist.mjs'; then
             echo "::error::Secret-shaped string found in a tracked file."
@@ -152,12 +159,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends postgresql-client libtap-parser-sourcehandler-pgtap-perl
 
+      - name: Report the server version actually running
+        run: |
+          set -euo pipefail
+          $PSQL -tAc "select version()"
+          $PSQL -tAc "select name, default_version, installed_version
+                        from pg_available_extensions
+                       where name in ('pgtap','pgcrypto')"
+          $PSQL -tAc "select current_user, usesuper from pg_user where usename = current_user"
+
       - name: Bootstrap the reconstruction
         run: |
           set -euo pipefail
           for f in supabase/bootstrap/*.sql; do
             echo "-- $f"
-            $PSQL -f "$f"
+            # Capture stderr so the actual psql message reaches the job
+            # ANNOTATION, which is readable without downloading the run log.
+            if ! err=$($PSQL -f "$f" 2>&1); then
+              echo "$err"
+              echo "::error file=$f::$(echo "$err" | tr '\n' ' ' | head -c 800)"
+              exit 1
+            fi
           done
 
       - name: Apply migrations
@@ -166,11 +188,24 @@ jobs:
           for f in supabase/migrations/*.sql; do
             case "$f" in *.down.sql) continue;; esac
             echo "-- $f"
-            $PSQL -f "$f"
+            if ! err=$($PSQL -f "$f" 2>&1); then
+              echo "$err"
+              echo "::error file=$f::$(echo "$err" | tr '\n' ' ' | head -c 800)"
+              exit 1
+            fi
           done
 
       - name: Run pgTAP
-        run: pg_prove --verbose supabase/tests/*.sql
+        run: |
+          set -euo pipefail
+          if ! out=$(pg_prove --verbose supabase/tests/*.sql 2>&1); then
+            echo "$out"
+            # Surface the failing assertions themselves, not just "exit 1".
+            echo "::error::$(echo "$out" | grep -E '^(not ok|#.*(Failed|expected|have|want))' \
+                              | head -20 | tr '\n' ' ' | head -c 800)"
+            exit 1
+          fi
+          echo "$out"
 
       # H.6.1 / plan §8. An untested rollback is a rollback that fails the
       # first time it is needed, which is also the worst possible moment.
