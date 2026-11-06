@@ -60,11 +60,15 @@ select is(
 -- ---------------------------------------------------------------------------
 -- A static assertion over the function bodies. If a future change introduces
 -- an admin grant anywhere reachable from a client action, this fails.
+-- Extension-owned functions are excluded: pgTAP and pgcrypto install into
+-- `public`, and what they contain says nothing about our code.
 select is(
   (select count(*) from pg_proc p
      join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.prosrc ilike '%''admin''%'),
+      and p.prosrc ilike '%''admin''%'
+      and not exists (select 1 from pg_depend d
+                       where d.objid = p.oid and d.deptype = 'e')),
   0::bigint,
   'NO function in public writes the literal admin (requirement 10)');
 
