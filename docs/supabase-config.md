@@ -31,20 +31,47 @@ them to the **development** project.
 | Sign-ups enabled | `GET /auth/v1/settings` | ✅ |
 | Email-only provider | `GET /auth/v1/settings` | ✅ |
 | Minimum password length 10 | Signup probe with a 6-char password | ✅ Rejected, `422 weak_password`, no account created |
-| **Leaked-password protection** | Signup probe with `password123` | ❌ **NOT ACTIVE** — accepted, account created |
+| **Leaked-password protection** | Signup probe with `password123` | ⚠️ **Unavailable — paid plan only.** Accepted as a known limitation; see below |
 | Site URL | — | Not exposed on any public endpoint. Exercised for real in Milestone 4 |
 | Redirect allow-list | — | Same |
 | Rate limits | — | Dashboard only; see table below |
 
-### Open gap: leaked-password protection
+### Accepted limitation: leaked-password protection unavailable
 
-A password present in public breach corpora is currently accepted. Architecture
-E.1 identifies this control as preventing more real compromises than any
-complexity rule.
+**Confirmed 2026-11-06: gated behind a paid Supabase plan. Not available on this
+tier.** Verified by probe — a signup with `password123` is accepted.
 
-Either the toggle is not enabled, or it is gated behind a paid plan on this
-tier. **This must be resolved before real users exist.** Recording it here
-rather than leaving the setting looking applied.
+Architecture E.1 states we will enable this control and identifies it as
+preventing more real compromises than any complexity rule. That intent stands;
+the mechanism is simply not purchasable at this tier right now.
+
+**Status: accepted limitation for development, unresolved for production.**
+
+#### What this actually means
+
+Any password of 10+ characters is accepted, including ones appearing in public
+breach corpora. The realistic attack is **credential stuffing**: an attacker
+replays username/password pairs leaked from other services. Password length does
+not help against it, because the password is already known.
+
+#### Compensating controls — to decide (see architecture checklist)
+
+| Option | Effect | Honest assessment |
+| --- | --- | --- |
+| Raise minimum length to 12+ | Helps against brute force | **Does nothing against credential stuffing.** A long breached password is still breached |
+| Client-side breach check (HaveIBeenPwned k-anonymity API — free, no key, only a hash prefix leaves the browser) | Warns or blocks at signup | **User experience only, not a security boundary.** Trivially bypassed by calling the API directly. Still stops honest users reusing a known-breached password, which is most of the real risk |
+| Server-side check in a password-validation hook | A genuine boundary | Hooks may themselves be plan-gated. Needs checking |
+| Enable Pro before launch | The intended fix | A cost decision |
+| Rate limiting + lockout | Blunts stuffing attempts | Already partly present; tighten in Milestone 8 |
+
+**Nothing here is implemented yet.** Recorded so the decision is made
+deliberately rather than inherited by silence.
+
+#### Required before production
+
+Either enable the Pro plan, or implement a server-side equivalent. **A
+client-side check alone must not be described as satisfying architecture E.1**,
+because it is not a boundary.
 
 ---
 

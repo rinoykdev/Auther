@@ -85,6 +85,21 @@ addressed.
 
 ---
 
+## Known limitation: leaked-password protection
+
+**Not available on the current Supabase plan** (confirmed 2026-11-06). Passwords
+appearing in public breach corpora are accepted, provided they meet the 10
+character minimum.
+
+Architecture E.1 commits to enabling this. Until the plan allows it, or a
+server-side equivalent exists, **this project does not meet E.1 in full** — a
+fact worth stating plainly rather than letting the checklist imply otherwise.
+
+The practical exposure is credential stuffing. Password length does not mitigate
+it. Options and the production requirement are in `supabase-config.md`.
+
+---
+
 ## If a key is exposed
 
 1. **Rotate it in the Supabase dashboard immediately.** Do this first.

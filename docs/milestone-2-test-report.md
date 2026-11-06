@@ -8,7 +8,7 @@ and what remains untested.
 | Milestone | 2 — Project setup |
 | Date | 2026-11-06 |
 | Backend | Supabase Cloud development project |
-| Outcome | **Complete, with one open gap** (see §4) |
+| Outcome | **Complete.** One accepted limitation and two carry-forward items (§4) |
 
 ---
 
@@ -92,16 +92,22 @@ the damage — another reason it must be correct before any table ships.
 
 ## 4. What failed and is NOT fixed
 
-### 🔴 Leaked-password protection is not active
+### 🟡 Leaked-password protection unavailable (accepted limitation)
 
-A signup with `password123` was **accepted** and created an account.
-Architecture E.1 identifies this control as preventing more real compromises
-than any complexity rule.
+A signup with `password123` is accepted. **Confirmed gated behind a paid
+Supabase plan**, so it cannot be enabled on this tier.
 
-Either the toggle is not enabled, or it is gated behind a paid plan.
+Architecture E.1 commits to this control. The intent stands; the mechanism is
+not purchasable here. Reclassified from a failure to an **accepted limitation
+for development, unresolved for production**.
 
-**Owner:** user. **Deadline:** before real users exist. Tracked in
-`supabase-config.md`.
+The real exposure is credential stuffing, which password length does not
+address. Compensating options are set out in `supabase-config.md`; none is
+implemented, and the decision is deliberately left open rather than inherited
+by silence.
+
+**Before production:** enable Pro, or implement a server-side equivalent. A
+client-side check alone does not satisfy E.1, because it is not a boundary.
 
 ### 🟡 Architecture amendments outstanding
 
