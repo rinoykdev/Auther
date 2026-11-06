@@ -3,7 +3,9 @@ import ProtectedRoute from '../features/auth/components/ProtectedRoute'
 import PublicOnlyRoute from '../features/auth/components/PublicOnlyRoute'
 import AuthCallbackPage from '../features/auth/pages/AuthCallbackPage'
 import CheckEmailPage from '../features/auth/pages/CheckEmailPage'
+import ForgotPasswordPage from '../features/auth/pages/ForgotPasswordPage'
 import LoginPage from '../features/auth/pages/LoginPage'
+import ResetPasswordPage from '../features/auth/pages/ResetPasswordPage'
 import SignUpPage from '../features/auth/pages/SignUpPage'
 import DashboardPage from '../pages/DashboardPage'
 import ForbiddenPage from '../pages/ForbiddenPage'
@@ -21,7 +23,6 @@ import NotFoundPage from '../pages/NotFoundPage'
  * for security.
  *
  * STILL ABSENT, deliberately:
- *   - /reset-password and /forgot-password   -> Milestone 5
  *   - /profile, /settings/security           -> Milestone 7
  *   - RoleGuard and /admin                   -> Milestone 10
  */
@@ -56,6 +57,13 @@ function AppRoutes() {
 
       {/* Public: the user has no session at either point, by design (C.1.1). */}
       <Route path="/check-email" element={<CheckEmailPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      {/*
+        NOT a ProtectedRoute and NOT a PublicOnlyRoute. The recovery link
+        creates a real session, so neither guard asks the right question — the
+        page gates itself on the PASSWORD_RECOVERY event (C.9 rule 2).
+      */}
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
       <Route path="/forbidden" element={<ForbiddenPage />} />

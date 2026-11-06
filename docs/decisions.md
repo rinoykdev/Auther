@@ -266,6 +266,37 @@ existing user plus a change to a trigger that is by then in the live sign-up pat
 requirement 9 becomes untestable, and §4.5 plus `045_default_role.sql` drop out of
 the plan. Nothing else changes.
 
+### D20 — pgTAP runs on the runner's own PostgreSQL, not a Supabase service container · **revised**, Milestone 3 ⚠️ *changes an approved condition (H.6 condition 1)*
+
+**What D13 approved:** a pinned `supabase/postgres` service container, chosen
+so that extensions and base roles would match the platform.
+
+**Why it does not work.** That image ships an `auth` schema owned by
+`supabase_admin`. The connecting `postgres` role is neither a superuser nor a
+member of it, so the bootstrap cannot create `auth.users`, and there is no way
+to grant ourselves in from inside the container. Established over three CI runs
+with diagnostics, not assumed.
+
+**What replaces it:** PostgreSQL on the GitHub runner itself, with pgTAP
+installed from the distribution packages. We are a real superuser there, so the
+fixture is constructible. **Still no Docker**, which is if anything closer to
+A.5 than the original.
+
+*What this costs, stated plainly:* the base-role and extension fidelity the
+Supabase image was chosen for. The reconstruction is now entirely ours.
+
+*Why that is tolerable:* we were already recreating the roles, helpers and
+grants by hand — the image supplied a starting point, not a guarantee. The real
+control over this risk was never the image; it is **H.6.1's parity check**,
+which compares roles, privileges and `auth.*` behaviour against the live
+project. D20 moves that check from advisable to **load-bearing**, and the
+pinned-version condition now applies to the runner's PostgreSQL and pgTAP
+packages.
+
+**This needs your approval**, because it changes an approved condition. If you
+would rather keep the Supabase image, the remaining route is a CI-only hosted
+project — which D13 rejected for good reasons that have not changed.
+
 ---
 
 ## Still open

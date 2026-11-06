@@ -5,18 +5,14 @@
 -- and `user_roles.user_id` point at, and `raw_user_meta_data`, which the
 -- trigger reads. Recreating more would be inventing a contract we do not have.
 --
--- OWNERSHIP MATTERS HERE, and it is why this file is more careful than it
--- looks. The pinned supabase/postgres image already ships an `auth` schema
--- owned by `supabase_auth_admin`, and `postgres` cannot create tables in it —
--- which is NOT a quirk of the image, it is the real platform's posture. A
--- naive `create table auth.users` therefore fails with "permission denied for
--- schema auth", which is how this first ran in CI.
---
--- The fix is to create the table AS the role that owns the schema, which is
--- also exactly what GoTrue does in production. Fighting the ownership (taking
--- the schema over, or granting ourselves into it) would have produced a
--- reconstruction that diverges from the platform in precisely the area the
--- parity check exists to watch.
+-- OWNERSHIP GUARD. On a plain cluster we create and own this schema, so the
+-- block below is a no-op. It is kept because a database that ALREADY has an
+-- auth schema owned by someone else is exactly where this silently goes
+-- wrong: three CI runs were spent discovering that the supabase/postgres
+-- image ships one owned by `supabase_admin`, which the connecting role cannot
+-- write to and cannot grant itself into (decision D20). The guard turns that
+-- into one clear message instead of a permission error three statements
+-- later.
 -- =============================================================================
 
 create schema if not exists auth;

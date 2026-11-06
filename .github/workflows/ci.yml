@@ -139,74 +139,61 @@ jobs:
     name: Database — GRANTs and RLS
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        # PINNED to an exact version (H.6 condition 1, decision O6). Never
-        # `latest` and never a tag that moves: the whole value of this job is
-        # that a green result means the same thing next month.
-        #
-        # The Supabase image rather than stock postgres, so extensions and base
-        # roles match the platform we deploy to.
-        image: supabase/postgres:17.11.0.007
-        env:
-          # Ephemeral, local to this run, and reachable only from this job.
-          # Not a secret in any meaningful sense, and not a Supabase credential.
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5432:5432
-
+    # NO service container, and no Docker.
+    #
+    # H.6 condition 1 originally specified a pinned `supabase/postgres`
+    # service container, so that extensions and base roles would match the
+    # platform. In practice that image ships an `auth` schema owned by
+    # `supabase_admin`, and the connecting `postgres` role is neither a
+    # superuser nor a member of it — so the bootstrap cannot create
+    # `auth.users` at all, and there is no way to grant ourselves in from
+    # inside the container. Three CI runs established this rather than
+    # assuming it.
+    #
+    # The runner's own PostgreSQL is used instead, where we are a real
+    # superuser and the fixture is actually constructible. What this costs is
+    # the base-role fidelity the image was chosen for — which is exactly the
+    # risk H.6.1's parity check exists to measure, and is now the reason it is
+    # mandatory rather than advisable. Recorded as decision D20.
     env:
       PGHOST: localhost
       PGPORT: '5432'
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: postgres
-      # Fail the step on the FIRST error rather than running on and reporting
-      # success at the end. Without this, a broken migration looks like a pass.
+      # Stop at the FIRST error rather than running on and reporting success.
       PSQL: psql -v ON_ERROR_STOP=1 --no-psqlrc --quiet
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install psql and pg_prove
+      - name: Start PostgreSQL and install pgTAP
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client libtap-parser-sourcehandler-pgtap-perl
+          # The runner ships a PostgreSQL cluster, stopped by default.
+          PGVER=$(pg_lsclusters -h | awk '{print $1}' | head -1)
+          echo "PGVER=$PGVER" >> "$GITHUB_ENV"
 
-      # Diagnostics are emitted as ::notice:: so they are readable from the
-      # check-run annotations, not only by downloading the run log. A fact
-      # nobody can see gets guessed at instead, which is how the previous two
-      # attempts at this job were debugged.
-      - name: Report what the pinned image actually provides
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            "postgresql-${PGVER}-pgtap" \
+            libtap-parser-sourcehandler-pgtap-perl
+
+          sudo systemctl start "postgresql@${PGVER}-main" || sudo pg_ctlcluster "$PGVER" main start
+          # Give the superuser a known password so psql over TCP works.
+          sudo -u postgres psql -c "alter role postgres with password 'postgres'"
+
+          until pg_isready -h localhost -p 5432; do sleep 1; done
+          echo "::notice::postgres $($PSQL -tAc 'show server_version') with pgTAP, cluster $PGVER"
+
+      - name: Report what the database actually provides
         run: |
           set -euo pipefail
           note() { echo "::notice::$1: $(echo "$2" | tr '\n' ' ' | head -c 700)"; }
-
-          note "version"    "$($PSQL -tAc 'select version()')"
-          note "extensions" "$($PSQL -tAc "select name || '=' || coalesce(installed_version,'(available)')
-                                             from pg_available_extensions
-                                            where name in ('pgtap','pgcrypto')")"
-          note "current"    "$($PSQL -tAc 'select current_user || \' super=\' || usesuper
-                                             from pg_user where usename = current_user')"
-          note "schemas"    "$($PSQL -tAc "select nspname || ' owned_by=' || pg_get_userbyid(nspowner)
-                                             from pg_namespace
-                                            where nspname in ('auth','public','extensions')")"
-          note "roles"      "$($PSQL -tAc "select rolname
-                                             || ' super='  || rolsuper
-                                             || ' login='  || rolcanlogin
-                                             || ' member=' || pg_has_role(current_user, rolname, 'MEMBER')
-                                             from pg_roles
-                                            where rolname like 'supabase%'
-                                               or rolname in ('postgres','anon','authenticated','service_role','authenticator')
-                                            order by rolname")"
-          note "auth_tables" "$($PSQL -tAc "select coalesce(string_agg(tablename, ','), '(none)')
-                                              from pg_tables where schemaname = 'auth'")"
+          note "current" "$($PSQL -tAc "select current_user || ' super=' || usesuper
+                                          from pg_user where usename = current_user")"
+          note "pgtap"   "$($PSQL -tAc "select coalesce(string_agg(name || '=' || default_version, ','), 'MISSING')
+                                          from pg_available_extensions where name in ('pgtap','pgcrypto')")"
 
       - name: Bootstrap the reconstruction
         run: |
@@ -241,8 +228,8 @@ jobs:
           if ! out=$(pg_prove --verbose supabase/tests/*.sql 2>&1); then
             echo "$out"
             # Surface the failing assertions themselves, not just "exit 1".
-            echo "::error::$(echo "$out" | grep -E '^(not ok|#.*(Failed|expected|have|want))' \
-                              | head -20 | tr '\n' ' ' | head -c 800)"
+            echo "::error::$(echo "$out" | grep -E '^(not ok|#)' | head -25 \
+                              | tr '\n' ' ' | head -c 900)"
             exit 1
           fi
           echo "$out"
@@ -270,7 +257,7 @@ jobs:
       - name: Collect the catalogue snapshot for the parity check
         run: |
           set -euo pipefail
-          $PSQL -f supabase/parity/collect.sql > parity-ci.txt
+          $PSQL -tAf supabase/parity/collect.sql > parity-ci.txt
           echo "Collected $(wc -l < parity-ci.txt) catalogue lines"
 
       # The CI half of the H.6.1 diff. The cloud half is produced by the owner
