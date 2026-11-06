@@ -74,10 +74,16 @@ jobs:
           #   service_role      Supabase service-role key or its JWT role claim
           #   eyJ...            a JWT, which may be a legacy service-role key
           #
-          # docs/ is excluded: the architecture document discusses these names
-          # at length by design. It is prose about keys, not keys.
+          # Exclusions, and why each is legitimate rather than a workaround:
+          #   docs/**           the architecture discusses these names at
+          #                     length by design. Prose about keys, not keys.
+          #   this workflow     it defines the patterns it searches for.
+          #   scan-dist.mjs     likewise — it is the dist scanner, so it
+          #                     necessarily contains the strings it hunts.
+          # Nothing else is excluded; a real secret cannot hide behind these.
           if git grep -nE '(sb_secret_[A-Za-z0-9_-]{8,}|service_role|eyJ[A-Za-z0-9_-]{30,})' \
-               -- . ':(exclude)docs/**' ':(exclude).github/workflows/ci.yml'; then
+               -- . ':(exclude)docs/**' ':(exclude).github/workflows/ci.yml' \
+                    ':(exclude)scripts/scan-dist.mjs'; then
             echo "::error::Secret-shaped string found in a tracked file."
             exit 1
           fi
