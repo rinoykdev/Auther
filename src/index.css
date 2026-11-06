@@ -14,41 +14,54 @@
 
 @theme {
   /* ---------------------------------------------------------------------------
-     Brand palette
-     Placeholder values. Auth screens are built in Milestone 4; this exists now
-     only so Step 2 can prove token-driven utilities compile.
-     --------------------------------------------------------------------------- */
-  --color-brand-50: oklch(0.97 0.014 254);
-  --color-brand-100: oklch(0.93 0.032 255);
-  --color-brand-200: oklch(0.88 0.059 254);
-  --color-brand-300: oklch(0.81 0.094 252);
-  --color-brand-400: oklch(0.71 0.143 254);
-  --color-brand-500: oklch(0.62 0.187 259);
-  --color-brand-600: oklch(0.55 0.212 263);
-  --color-brand-700: oklch(0.49 0.2 264);
-  --color-brand-800: oklch(0.42 0.17 264);
-  --color-brand-900: oklch(0.38 0.135 266);
-
-  /* ---------------------------------------------------------------------------
      Typography
+     Plus Jakarta Sans is loaded in index.html. The fallback stack is geometric
+     where possible so a failed font load degrades gracefully rather than
+     dropping to Times.
      --------------------------------------------------------------------------- */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
+
+  /* ---------------------------------------------------------------------------
+     Login screen palette
+     Sampled directly from the approved design rather than eyeballed:
+     #000308 is the screenshot's background, and the EV hero image's own corner
+     measures #020307 — a 2/255 difference, so the image blends into the page
+     with no visible seam and needs no alpha channel.
+     --------------------------------------------------------------------------- */
+  --color-ink-950: #000308; /* page background */
+  --color-ink-900: #10171c; /* primary button */
+  --color-panel: #f1f2f4; /* login panel */
+
+  /* ---------------------------------------------------------------------------
+     Intellicar red, keyed to the logo mark.
+     Full 50–900 scale because the Milestone 2 placeholder pages already use
+     brand-300/400/600/700; trimming the scale would silently drop their
+     styling rather than erroring.
+     --------------------------------------------------------------------------- */
+  --color-brand-50: #fef2f4;
+  --color-brand-100: #fde3e8;
+  --color-brand-200: #fbccd6;
+  --color-brand-300: #f7a3b6;
+  --color-brand-400: #f16f8e;
+  --color-brand-500: #e8274b;
+  --color-brand-600: #d01f41;
+  --color-brand-700: #af1737;
+  --color-brand-800: #921633;
+  --color-brand-900: #7d1631;
 }
 
 /* -----------------------------------------------------------------------------
    Base layer
-   Minimal, deliberately. Form and field styling arrives with the real auth
-   screens in Milestone 4.
    ----------------------------------------------------------------------------- */
 @layer base {
   :root {
-    color-scheme: light dark;
+    color-scheme: dark;
   }
 
   body {
-    @apply min-h-screen bg-white text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    @apply min-h-screen bg-ink-950 font-sans text-white antialiased;
   }
 }
