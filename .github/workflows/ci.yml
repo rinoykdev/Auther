@@ -95,12 +95,32 @@ jobs:
           # their own. Matching `service_role_key`-shaped variable names keeps
           # the intent without flagging every GRANT statement. Excluding
           # supabase/** instead would have let a real key hide there.
-          if git grep -niE '(sb_secret_[A-Za-z0-9_-]{8,}|service[_-]?role[_-]?key|eyJ[A-Za-z0-9_-]{30,})' \
-               -- . ':(exclude)docs/**' ':(exclude).github/workflows/ci.yml' \
-                    ':(exclude)scripts/scan-dist.mjs'; then
-            echo "::error::Secret-shaped string found in a tracked file."
+          EXCLUDE=(-- . ':(exclude)docs/**' ':(exclude).github/workflows/ci.yml'
+                   ':(exclude)scripts/scan-dist.mjs')
+
+          # Two greps, because the two pattern families need DIFFERENT case
+          # sensitivity and one -i flag would apply to both.
+          #
+          # (a) Key VALUES - case-SENSITIVE. A JWT always begins with the
+          #     literal `eyJ` (base64 of `{"`), so matching it case-
+          #     insensitively finds base64 noise instead: `-i` matched an
+          #     npm integrity hash in package-lock.json, which is how this
+          #     check first failed.
+          if git grep -nE '(sb_secret_[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{30,})' "${EXCLUDE[@]}"; then
+            echo "::error::Secret-shaped VALUE found in a tracked file. Rotate it."
             exit 1
           fi
+
+          # (b) Key NAMES - case-INsensitive, since a variable may be spelled
+          #     any way. The bare role name `service_role` is deliberately NOT
+          #     matched: it is a PostgreSQL role that supabase/*.sql writes in
+          #     ordinary GRANT statements. A service-role KEY is always one of
+          #     the two value shapes above, so nothing is lost by this.
+          if git grep -niE 'service[_-]?role[_-]?key[^A-Za-z0-9_-]*[=:]' "${EXCLUDE[@]}"; then
+            echo "::error::A service-role key variable appears to be assigned a value."
+            exit 1
+          fi
+
           echo "OK: no secret-shaped strings"
 
       - name: History check
@@ -167,6 +187,14 @@ jobs:
                         from pg_available_extensions
                        where name in ('pgtap','pgcrypto')"
           $PSQL -tAc "select current_user, usesuper from pg_user where usename = current_user"
+          # Schema ownership and role membership: the two facts that decide
+          # whether the bootstrap can create auth.users at all.
+          $PSQL -tAc "select nspname, pg_get_userbyid(nspowner) as owner
+                        from pg_namespace where nspname in ('auth','public')"
+          $PSQL -tAc "select r.rolname, pg_has_role(current_user, r.rolname, 'MEMBER') as member
+                        from pg_roles r
+                       where r.rolname like 'supabase%' or r.rolname in
+                             ('anon','authenticated','service_role','authenticator')"
 
       - name: Bootstrap the reconstruction
         run: |

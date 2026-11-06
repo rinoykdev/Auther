@@ -1,111 +1,165 @@
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import Alert from '../components/Alert'
 import AuthLayout from '../components/AuthLayout'
-import GoogleMark from '../components/GoogleMark'
-import PillInput from '../components/PillInput'
+import FormField from '../components/FormField'
+import SocialButton from '../components/SocialButton'
+import SubmitButton from '../components/SubmitButton'
+import { useAuth } from '../hooks/useAuth'
+import { toUserMessage } from '../lib/errorMessages'
+import { MIN_PASSWORD_LENGTH, validateSignUp } from '../lib/validation'
 
 /**
  * =============================================================================
- * Sign Up — VISUAL ONLY
+ * Sign Up (architecture C.1, F screen 1)
  * =============================================================================
+ * Four fields, fixed by C.1: full name, email, password, confirm password.
  *
- * The registration screen specified in architecture revision 7 (C.1, F screen
- * 1), built ahead of Milestone 4 as a visual task, exactly as the login screen
- * was.
+ * WHAT THIS SCREEN DOES NOT DO, and must not start doing:
+ *   - it does not create the profile row or assign a role. The database
+ *     trigger does both, inside the auth.users insert transaction (D.4). A
+ *     form that wrote them would be the client doing the server's job, and
+ *     would be skippable by anyone calling the API directly;
+ *   - it does not send `confirmPassword` anywhere. The comparison happens here
+ *     and the value is discarded, because no server checks it;
+ *   - it does not tell the user whether an address is already registered. With
+ *     email confirmation on, Supabase deliberately shapes that response to
+ *     look like a new registration, and we must not add the information back
+ *     by behaving differently (H.3 Family 3).
  *
- * THERE IS NO REGISTRATION HERE, deliberately:
- *   - the form does not submit and the inputs hold no state;
- *   - nothing is validated — not the email, not the password length, and NOT
- *     whether the two passwords match;
- *   - no account is created, no email is sent, no profile row appears;
- *   - nothing imports supabaseClient.
- *
- * Real behaviour arrives in Milestone 4, and it depends on Milestone 3's
- * database work landing first: the `profiles` row and the default `user` role
- * are created by a database trigger when Supabase Auth inserts the user, not
- * by this screen (architecture C.1 step 5, D.4). A signup form that wrote
- * those rows itself would be the client doing the server's job, which is the
- * mistake D.4 exists to prevent.
- *
- * Fields are fixed at four by C.1: full name, email, password, confirm
- * password. The confirm value is a typo guard that is compared in the browser
- * and then discarded — when this is wired up it must NOT be sent anywhere,
- * because sending it would imply a server-side check that does not exist.
- *
- * The "Full name" field populates `profiles.display_name` (D.2 naming note):
- * the column keeps that name because the value is editable afterwards, so what
- * it holds is chosen presentation rather than verified identity.
+ * On success we go to Check Your Email. There is NO session at this point -
+ * that null session is what makes requirement 7 true (C.1.1).
  * =============================================================================
  */
 
 function SignUpPage() {
+  const { signUp } = useAuth()
+  const navigate = useNavigate()
+
+  const [values, setValues] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  })
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [formError, setFormError] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const update = (key) => (event) => {
+    setValues((v) => ({ ...v, [key]: event.target.value }))
+    // Clear this field's error as soon as the user edits it. Leaving stale
+    // errors on screen while someone is fixing them is its own small cruelty.
+    setFieldErrors((e) => (e[key] ? { ...e, [key]: undefined } : e))
+  }
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setFormError(null)
+
+    const errors = validateSignUp(values)
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors)
+      return
+    }
+
+    setBusy(true)
+    const { error } = await signUp({
+      email: values.email,
+      password: values.password,
+      fullName: values.fullName,
+    })
+    setBusy(false)
+
+    if (error) {
+      setFormError(toUserMessage(error))
+      return
+    }
+
+    // The email is carried so Check Your Email can offer a resend. It travels
+    // in router state, not the URL: an address in a query string ends up in
+    // browser history, server logs and referrer headers (E.6).
+    navigate('/check-email', { state: { email: values.email.trim() } })
+  }
+
   return (
     <AuthLayout
       title="Create your account"
       subtitle="Get started with your Intellicar account"
     >
-      <form className="mt-10" onSubmit={(event) => event.preventDefault()}>
+      <form className="mt-10" onSubmit={handleSubmit} noValidate>
+        {formError && (
+          <div className="mb-6">
+            <Alert tone="error">{formError}</Alert>
+          </div>
+        )}
+
         <div className="space-y-5">
-          <PillInput
+          <FormField
             id="fullName"
             label="Full name"
             type="text"
             autoComplete="name"
+            value={values.fullName}
+            onChange={update('fullName')}
+            error={fieldErrors.fullName}
           />
-          <PillInput
+          <FormField
             id="email"
             label="Email"
             type="email"
             autoComplete="email"
+            value={values.email}
+            onChange={update('email')}
+            error={fieldErrors.email}
           />
           {/*
-            autoComplete="new-password" on BOTH password fields: it tells the
-            browser and password managers this is a registration, so they offer
-            to generate and store a password rather than autofilling an
-            existing one into the confirm box.
+            autoComplete="new-password" on BOTH: it tells the browser and
+            password managers this is a registration, so they offer to generate
+            and store a password rather than autofilling an existing one into
+            the confirm box.
           */}
-          <PillInput
+          <FormField
             id="password"
             label="Password"
             type="password"
             autoComplete="new-password"
+            value={values.password}
+            onChange={update('password')}
+            error={fieldErrors.password}
           />
-          <PillInput
+          <FormField
             id="confirmPassword"
             label="Confirm password"
             type="password"
             autoComplete="new-password"
+            value={values.confirmPassword}
+            onChange={update('confirmPassword')}
+            error={fieldErrors.confirmPassword}
           />
         </div>
 
         {/*
-          Stated, not enforced. The 10-character minimum is checklist item 8
-          and the real boundary is Supabase Auth's own policy, applied
-          server-side in Milestone 4 — this line only sets the expectation so
-          the rule does not first appear as a rejection.
+          Stated up front rather than as a rejection. The real boundary is
+          Supabase Auth's own policy, applied server-side (checklist item 8);
+          this only sets the expectation.
         */}
-        <p className="mt-3 pl-1.5 text-sm text-ink-900/70">
-          Use at least 10 characters.
+        <p className="mt-3 pl-6 text-sm text-ink-900/70">
+          Use at least {MIN_PASSWORD_LENGTH} characters.
         </p>
 
-        <button
-          type="submit"
-          className="mt-8 w-full rounded-full bg-ink-900 py-4 text-base font-bold text-white transition-colors hover:bg-ink-900/90 focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 focus-visible:ring-offset-panel focus-visible:outline-none"
-        >
-          Create account
-        </button>
+        <div className="mt-8">
+          <SubmitButton busy={busy} busyLabel="Creating account…">
+            Create account
+          </SubmitButton>
+        </div>
       </form>
 
       <p className="mt-8 text-center text-[0.95rem] text-ink-900/80">
         Or sign up with
       </p>
 
-      <button
-        type="button"
-        className="mt-4 flex w-full items-center justify-center gap-3 rounded-full border border-slate-300 bg-transparent py-4 text-base font-semibold text-ink-900 transition-colors hover:bg-black/[0.03] focus-visible:ring-2 focus-visible:ring-ink-900 focus-visible:ring-offset-2 focus-visible:ring-offset-panel focus-visible:outline-none"
-      >
-        <GoogleMark />
-        Continue with Google
-      </button>
+      <SocialButton verb="sign up" />
 
       {/*
         Requirement 1 — the two screens link to each other. A real router Link,
