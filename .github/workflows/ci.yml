@@ -170,6 +170,15 @@ jobs:
       PGDATABASE: postgres
       # Stop at the FIRST error rather than running on and reporting success.
       PSQL: psql -v ON_ERROR_STOP=1 --no-psqlrc --quiet
+      # PINNED (H.6 condition 1). Taking whatever the runner image happens to
+      # ship is the moving target that condition forbids — the version could
+      # change under us with no commit of ours, and a pgTAP result would
+      # quietly start meaning something different.
+      #
+      # This must track the Supabase development project's major version. We
+      # do not know it yet; the first parity run (H.6.1) establishes it, and a
+      # mismatch there is a finding to act on, not a nuisance.
+      PG_MAJOR: '16'
 
     steps:
       - uses: actions/checkout@v5
@@ -179,7 +188,10 @@ jobs:
           set -euo pipefail
           # The runner ships a PostgreSQL cluster, stopped by default.
           PGVER=$(pg_lsclusters -h | awk '{print $1}' | head -1)
-          echo "PGVER=$PGVER" >> "$GITHUB_ENV"
+          if [ "$PGVER" != "$PG_MAJOR" ]; then
+            echo "::error::Runner ships PostgreSQL $PGVER but this project pins $PG_MAJOR. Change PG_MAJOR deliberately, after checking it against the Supabase project (H.6.1)."
+            exit 1
+          fi
 
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -231,15 +243,39 @@ jobs:
 
       - name: Run pgTAP
         run: |
-          set -euo pipefail
-          if ! out=$(pg_prove --verbose supabase/tests/*.sql 2>&1); then
-            echo "$out"
-            # Surface the failing assertions themselves, not just "exit 1".
-            echo "::error::$(echo "$out" | grep -E '^(not ok|#)' | head -25 \
-                              | tr '\n' ' ' | head -c 900)"
-            exit 1
+          set -uo pipefail
+          if pg_prove --verbose supabase/tests/*.sql > pgtap.log 2>&1; then
+            cat pgtap.log
+            exit 0
           fi
-          echo "$out"
+
+          cat pgtap.log
+
+          # ONE annotation per failing assertion. The previous version piped
+          # through a filter that matched nothing and emitted an empty
+          # ::error::, which GitHub silently drops - so a failing suite
+          # reported "exit code 1" and nothing else, which is how this step
+          # became undiagnosable.
+          #
+          # `|| true` on every grep: a filter that finds nothing must not
+          # itself fail the step and hide the rest.
+          {
+            grep -F 'not ok' pgtap.log || true
+            grep -E 'Failed test|Looks like you|^Result:|^Files=' pgtap.log || true
+          } | head -40 | while IFS= read -r line; do
+            [ -n "$line" ] && echo "::error::${line}"
+          done
+
+          echo "::error::pgTAP suite failed - see the annotations above and the pgtap-log artifact"
+          exit 1
+
+      - name: Upload the pgTAP log
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: pgtap-log
+          path: pgtap.log
+          if-no-files-found: ignore
 
       # H.6.1 / plan §8. An untested rollback is a rollback that fails the
       # first time it is needed, which is also the worst possible moment.
