@@ -251,30 +251,30 @@ jobs:
 
           cat pgtap.log
 
-          # ONE annotation per failing assertion. The previous version piped
-          # through a filter that matched nothing and emitted an empty
-          # ::error::, which GitHub silently drops - so a failing suite
-          # reported "exit code 1" and nothing else, which is how this step
-          # became undiagnosable.
-          #
-          # `|| true` on every grep: a filter that finds nothing must not
-          # itself fail the step and hide the rest.
-          grep -v -E '^\s*ok [0-9]+' pgtap.log | grep -v '^\s*$' | head -40 \
-            | while IFS= read -r line; do
-                echo "::error::${line}"
-              done
+          # ANNOTATION BUDGET: GitHub keeps only the first 10 annotations per
+          # level per step. An earlier version dumped the log here and spent
+          # the whole budget on file headers, which silently dropped the
+          # diagnostics added below it - so the run reported where the suite
+          # got to and never why it stopped. Diagnosis goes FIRST now, and
+          # the bulk log stays in the artifact where it has no budget.
 
-          # pg_prove reports a file that DIES as "Dubious, test returned N"
-          # and SWALLOWS the SQL error that killed it - so the one piece of
-          # information needed is the one it does not print. Re-running the
-          # file through psql prints `ERROR: ... LINE n:` directly.
+          # 1. The SQL error, which pg_prove swallows. A file that dies shows
+          #    as "Dubious, test returned N" with no hint of the cause; psql
+          #    prints `ERROR: ... LINE n:` plainly.
           for f in supabase/tests/*.sql; do
             if ! out=$(psql --no-psqlrc -v ON_ERROR_STOP=1 -f "$f" 2>&1 >/dev/null); then
-              echo "::error file=$f::$(echo "$out" | tr '\n' ' ' | head -c 700)"
+              echo "::error file=$f::DIED: $(echo "$out" | tr '\n' ' ' | head -c 600)"
             fi
           done
 
-          echo "::error::pgTAP suite failed - see the annotations above and the pgtap-log artifact"
+          # 2. Failed assertions, which are a different thing from a dying
+          #    file: the file ran to completion and an expectation was false.
+          grep -F 'not ok' pgtap.log | head -5 | while IFS= read -r line; do
+            echo "::error::ASSERTION: ${line}"
+          done
+
+          # 3. One line of context, last, so it can never crowd out the above.
+          echo "::error::$(grep -E '^(Result:|Files=)' pgtap.log | tr '\n' ' ' | head -c 200)"
           exit 1
 
       - name: Upload the pgTAP log
