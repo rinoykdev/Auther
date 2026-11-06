@@ -179,22 +179,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends postgresql-client libtap-parser-sourcehandler-pgtap-perl
 
-      - name: Report the server version actually running
+      # Diagnostics are emitted as ::notice:: so they are readable from the
+      # check-run annotations, not only by downloading the run log. A fact
+      # nobody can see gets guessed at instead, which is how the previous two
+      # attempts at this job were debugged.
+      - name: Report what the pinned image actually provides
         run: |
           set -euo pipefail
-          $PSQL -tAc "select version()"
-          $PSQL -tAc "select name, default_version, installed_version
-                        from pg_available_extensions
-                       where name in ('pgtap','pgcrypto')"
-          $PSQL -tAc "select current_user, usesuper from pg_user where usename = current_user"
-          # Schema ownership and role membership: the two facts that decide
-          # whether the bootstrap can create auth.users at all.
-          $PSQL -tAc "select nspname, pg_get_userbyid(nspowner) as owner
-                        from pg_namespace where nspname in ('auth','public')"
-          $PSQL -tAc "select r.rolname, pg_has_role(current_user, r.rolname, 'MEMBER') as member
-                        from pg_roles r
-                       where r.rolname like 'supabase%' or r.rolname in
-                             ('anon','authenticated','service_role','authenticator')"
+          note() { echo "::notice::$1: $(echo "$2" | tr '\n' ' ' | head -c 700)"; }
+
+          note "version"    "$($PSQL -tAc 'select version()')"
+          note "extensions" "$($PSQL -tAc "select name || '=' || coalesce(installed_version,'(available)')
+                                             from pg_available_extensions
+                                            where name in ('pgtap','pgcrypto')")"
+          note "current"    "$($PSQL -tAc 'select current_user || \' super=\' || usesuper
+                                             from pg_user where usename = current_user')"
+          note "schemas"    "$($PSQL -tAc "select nspname || ' owned_by=' || pg_get_userbyid(nspowner)
+                                             from pg_namespace
+                                            where nspname in ('auth','public','extensions')")"
+          note "roles"      "$($PSQL -tAc "select rolname
+                                             || ' super='  || rolsuper
+                                             || ' login='  || rolcanlogin
+                                             || ' member=' || pg_has_role(current_user, rolname, 'MEMBER')
+                                             from pg_roles
+                                            where rolname like 'supabase%'
+                                               or rolname in ('postgres','anon','authenticated','service_role','authenticator')
+                                            order by rolname")"
+          note "auth_tables" "$($PSQL -tAc "select coalesce(string_agg(tablename, ','), '(none)')
+                                              from pg_tables where schemaname = 'auth'")"
 
       - name: Bootstrap the reconstruction
         run: |

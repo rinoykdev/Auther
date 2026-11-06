@@ -1,21 +1,25 @@
 import { BrowserRouter } from 'react-router-dom'
+import AuthProvider from './features/auth/context/AuthProvider'
 import AppRoutes from './routes/AppRoutes'
 
 /**
  * Application shell.
  *
- * Deliberately thin: it holds the router and nothing else. Page layout belongs
- * to the pages, because they do not agree on one — the placeholder pages want a
- * narrow centred column, while the login screen is a full-bleed split layout.
- * A shared wrapper here would have to be fought by every full-screen page.
+ * AuthProvider sits INSIDE BrowserRouter and OUTSIDE AppRoutes: the guards
+ * need both router context and session state, and the provider itself must
+ * survive navigation rather than remount on every route change — remounting
+ * would re-enter the `loading` state and flash the spinner between pages.
  *
- * NOT here in Milestone 2: AuthProvider. It arrives in Milestone 4 and will
- * wrap AppRoutes so session state is available to guards and pages.
+ * Still deliberately thin otherwise. Page layout belongs to the pages, which
+ * do not agree on one: the auth screens are a full-bleed split, the dashboard
+ * is a narrow centred column.
  */
 function App() {
   return (
     <BrowserRouter>
-      <AppRoutes />
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
     </BrowserRouter>
   )
 }

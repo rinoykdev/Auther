@@ -1,90 +1,98 @@
-import { render, screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { Route } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
+import { renderWithAuth } from '../../../test/renderWithAuth'
+import { GENERIC_CREDENTIALS } from '../lib/errorMessages'
 import LoginPage from './LoginPage'
 
-// The page now carries a router Link to /signup, so it needs a router in the
-// tree. MemoryRouter keeps the test free of a real URL bar.
-const renderPage = () =>
-  render(
-    <MemoryRouter>
-      <LoginPage />
-    </MemoryRouter>,
-  )
+const signInWith = async (user, email = 'ada@example.com', password = 'hunter2hunter2') => {
+  await user.type(screen.getByLabelText(/login with email/i), email)
+  await user.type(screen.getByLabelText(/^password$/i), password)
+  await user.click(screen.getByRole('button', { name: /^login$/i }))
+}
 
-/**
- * Component tests for the login screen.
- *
- * Two jobs. First, confirm the approved design is present. Second — and more
- * importantly for this milestone — confirm it does NOT authenticate. The scope
- * boundary is the thing most likely to erode quietly as later work lands, so it
- * is asserted rather than assumed.
- */
 describe('LoginPage', () => {
   it('renders the approved content', () => {
-    renderPage()
+    renderWithAuth(<LoginPage />, { route: '/login' })
 
-    expect(
-      screen.getByRole('heading', { name: /welcome back/i }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/login to your intellicar account/i),
-    ).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/login with email/i)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/password/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /welcome back/i })).toBeInTheDocument()
+    expect(screen.getByLabelText(/login with email/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^login$/i })).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /continue with google/i }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /forgot password/i }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /forgot password/i })).toBeInTheDocument()
+  })
+
+  it('shows ONE generic message for every credential failure', async () => {
+    const user = userEvent.setup()
+
+    // Two different underlying causes. Supabase distinguishes them; we must
+    // not, because the difference is a membership oracle (H.3 Family 3).
+    for (const error of [{ code: 'invalid_credentials' }, { code: 'user_not_found' }]) {
+      const { unmount } = renderWithAuth(<LoginPage />, {
+        route: '/login',
+        auth: { signIn: vi.fn().mockResolvedValue({ data: null, error }) },
+      })
+
+      await signInWith(user)
+      expect(await screen.findByRole('alert')).toHaveTextContent(GENERIC_CREDENTIALS)
+      unmount()
+    }
+  })
+
+  it('offers a resend when the account is unconfirmed', async () => {
+    const user = userEvent.setup()
+    const resendConfirmation = vi.fn().mockResolvedValue({ error: null })
+    renderWithAuth(<LoginPage />, {
+      route: '/login',
+      auth: {
+        signIn: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: 'email_not_confirmed' },
+        }),
+        resendConfirmation,
+      },
+    })
+
+    await signInWith(user)
+    await user.click(await screen.findByRole('button', { name: /resend/i }))
+
+    await waitFor(() => expect(resendConfirmation).toHaveBeenCalled())
+    expect(await screen.findByText(/on its way/i)).toBeInTheDocument()
+  })
+
+  it('does not call the server when a field is empty', async () => {
+    const user = userEvent.setup()
+    const signIn = vi.fn()
+    renderWithAuth(<LoginPage />, { route: '/login', auth: { signIn } })
+
+    await user.click(screen.getByRole('button', { name: /^login$/i }))
+
+    expect(await screen.findByText(/enter your email/i)).toBeInTheDocument()
+    expect(signIn).not.toHaveBeenCalled()
+  })
+
+  it('returns the user to the page they were sent away from', async () => {
+    const user = userEvent.setup()
+    // ProtectedRoute puts the intended path in location.state.from. Simulated
+    // here by rendering the destination and asserting we land on it.
+    renderWithAuth(<LoginPage />, {
+      route: '/login',
+      routes: <Route path="/" element={<p>dashboard</p>} />,
+    })
+
+    await signInWith(user)
+    expect(await screen.findByText(/dashboard/i)).toBeInTheDocument()
   })
 
   it('links to Sign Up without carrying the typed email across', async () => {
     const user = userEvent.setup()
-    renderPage()
+    renderWithAuth(<LoginPage />, { route: '/login' })
 
     const link = screen.getByRole('link', { name: /create an account/i })
     expect(link).toHaveAttribute('href', '/signup')
 
-    // Architecture H.3 Family 3: forwarding the address would let a visitor
-    // learn from the destination screen whether it is already registered.
-    await user.type(screen.getByPlaceholderText(/login with email/i), 'a@b.com')
+    await user.type(screen.getByLabelText(/login with email/i), 'a@b.com')
     expect(link).toHaveAttribute('href', '/signup')
-  })
-
-  it('labels every input for screen readers', () => {
-    renderPage()
-
-    // Placeholders are not labels. The design shows no visible labels, so each
-    // field carries a visually hidden one.
-    expect(screen.getByLabelText(/login with email/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument()
-  })
-
-  it('accepts typed input', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    const email = screen.getByPlaceholderText(/login with email/i)
-    await user.type(email, 'someone@example.com')
-
-    expect(email).toHaveValue('someone@example.com')
-  })
-
-  it('does not navigate or submit when the form is submitted', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    // jsdom logs "Not implemented: HTMLFormElement.prototype.requestSubmit"
-    // if a real submit escapes. preventDefault keeps the page static, which is
-    // the intended Milestone 2 behaviour: the button is visual only.
-    await user.click(screen.getByRole('button', { name: /^login$/i }))
-
-    expect(
-      screen.getByRole('heading', { name: /welcome back/i }),
-    ).toBeInTheDocument()
   })
 })

@@ -24,7 +24,10 @@ export function validateSignUp({ fullName, email, password, confirmPassword }) {
 
   if (!password) errors.password = 'Please choose a password.'
   else if (password.length < MIN_PASSWORD_LENGTH)
-    errors.password = `Use at least ${MIN_PASSWORD_LENGTH} characters.`
+    // Deliberately NOT the same wording as the hint under the field. An
+    // identical string is indistinguishable from the always-present hint —
+    // the user cannot tell the form responded, and nor can a test.
+    errors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
 
   // The confirm field is a typo guard. It is compared here and then discarded
   // — it is never sent anywhere, because no server checks it (C.1).
