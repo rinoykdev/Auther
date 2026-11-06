@@ -18,7 +18,33 @@ them to the **development** project.
 | --- | --- |
 | Project | development (`zhlnyokrxppzsfahijiu`) |
 | Verified against | `GET /auth/v1/settings`, 2026-11-06 |
-| Applied by | *(pending — see "To apply" below)* |
+| Applied by | User, 2026-11-06 |
+| Verified | Partially — see "Verification results" below |
+
+---
+
+## Verification results (2026-11-06)
+
+| Setting | How verified | Result |
+| --- | --- | --- |
+| Email confirmation required | `GET /auth/v1/settings` | ✅ `mailer_autoconfirm: false` |
+| Sign-ups enabled | `GET /auth/v1/settings` | ✅ |
+| Email-only provider | `GET /auth/v1/settings` | ✅ |
+| Minimum password length 10 | Signup probe with a 6-char password | ✅ Rejected, `422 weak_password`, no account created |
+| **Leaked-password protection** | Signup probe with `password123` | ❌ **NOT ACTIVE** — accepted, account created |
+| Site URL | — | Not exposed on any public endpoint. Exercised for real in Milestone 4 |
+| Redirect allow-list | — | Same |
+| Rate limits | — | Dashboard only; see table below |
+
+### Open gap: leaked-password protection
+
+A password present in public breach corpora is currently accepted. Architecture
+E.1 identifies this control as preventing more real compromises than any
+complexity rule.
+
+Either the toggle is not enabled, or it is gated behind a paid plan on this
+tier. **This must be resolved before real users exist.** Recording it here
+rather than leaving the setting looking applied.
 
 ---
 

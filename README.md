@@ -6,7 +6,7 @@ Identity, sessions and self-service account management, packaged so it can be
 dropped into another app by copying one folder and setting two environment
 variables.
 
-**Status: Milestone 2 (project setup), in progress.** No authentication flows,
+**Status: Milestone 2 (project setup) complete.** No authentication flows,
 database tables, RLS policies or Edge Functions exist yet. See `docs/` for the
 approved architecture and milestone plan.
 
@@ -103,4 +103,5 @@ Full detail: `docs/security.md` (written in Step 9) and architecture section E.5
 | `docs/supabase-config.md` | Dashboard settings, traced to their requirement |
 | `docs/onboarding-another-developer.md` | Connecting a second developer to the shared dev project |
 
-`docs/token-claims.md` arrives with the token investigation (Step 7).
+| `docs/token-claims.md` | Observed token behaviour; the `auth_time` finding |
+| `docs/milestone-2-test-report.md` | What was tested, what passed, what remains |
