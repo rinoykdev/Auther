@@ -67,6 +67,11 @@ The app serves at **http://localhost:5173**.
 | `npm run build` | Produce a production build in `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | Lint the source |
+| `npm test` | Run unit/component tests in watch mode |
+| `npm run test:ci` | Run them once (used by CI) |
+| `npm run test:coverage` | Tests with a coverage report |
+| `npm run test:e2e` | Playwright end-to-end tests |
+| `npm run scan:dist` | Scan the built bundle for secrets |
 
 ---
 
@@ -92,8 +97,10 @@ Full detail: `docs/security.md` (written in Step 9) and architecture section E.5
 | Document | Contents |
 | --- | --- |
 | `docs/architecture.md` | Approved Milestone 1 architecture: flows, database design, security model, testing strategy |
-| `docs/milestone-2-plan.md` | Approved Milestone 2 plan: the setup work currently in progress |
+| `docs/milestone-2-plan.md` | Approved Milestone 2 plan |
+| `docs/setup.md` | Clean-machine setup, connectivity states, troubleshooting |
+| `docs/security.md` | Credential rules and what CI enforces |
+| `docs/supabase-config.md` | Dashboard settings, traced to their requirement |
+| `docs/onboarding-another-developer.md` | Connecting a second developer to the shared dev project |
 
-Further documents arrive during Milestone 2: `setup.md`, `security.md`,
-`supabase-config.md`, `token-claims.md`, and the onboarding guide for a second
-developer.
+`docs/token-claims.md` arrives with the token investigation (Step 7).

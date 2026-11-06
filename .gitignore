@@ -36,3 +36,10 @@ lerna-debug.log*
 
 # --- Deferred tooling (not used in the current plan) ---
 .vercel
+
+# --- Test artefacts ---
+coverage
+playwright-report
+test-results
+/blob-report
+/playwright/.cache

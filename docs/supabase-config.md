@@ -1,0 +1,131 @@
+# Supabase Cloud — dashboard configuration
+
+Settings that live in the Supabase dashboard rather than in this repository, so
+that a rebuilt or second project can be brought to the same state.
+
+Each item is traced to the section of `architecture.md` that requires it. Apply
+them to the **development** project.
+
+> **Why this file exists.** Dashboard settings are invisible to code review and
+> absent from a rebuilt environment. Writing them down is the only version
+> control they get.
+
+---
+
+## Status
+
+| | |
+| --- | --- |
+| Project | development (`zhlnyokrxppzsfahijiu`) |
+| Verified against | `GET /auth/v1/settings`, 2026-11-06 |
+| Applied by | *(pending — see "To apply" below)* |
+
+---
+
+## Already correct by default
+
+Confirmed from the live project; **no action needed**.
+
+| Setting | Observed | Required | Why |
+| --- | --- | --- | --- |
+| `mailer_autoconfirm` | `false` | `false` | Email confirmation required before first login. `false` means Supabase does **not** auto-confirm, i.e. the user must click the link (architecture C.2, checklist item 5) |
+| `disable_signup` | `false` | `false` | Registration must work (architecture C.1) |
+| Providers enabled | `email` only | `email` only | Social login is deferred (architecture 0.2) |
+| `passkeys_enabled` | `false` | `false` | Out of scope |
+
+---
+
+## To apply
+
+These are **not** exposed on the public settings endpoint, so they cannot be
+verified from code — they must be set and read back in the dashboard.
+
+### 1. URL configuration
+
+**Authentication → URL Configuration**
+
+| Field | Value |
+| --- | --- |
+| Site URL | `http://localhost:5173` |
+| Redirect URLs | `http://localhost:5173/auth/callback` |
+| Redirect URLs | `http://localhost:5173/reset-password` |
+
+**Why these exact paths.** Supabase refuses to redirect anywhere not on this
+list, and falls back to the Site URL instead. A missing entry surfaces in
+Milestone 4 as "email verification is broken" rather than as a configuration
+error, which is an expensive way to lose an afternoon (architecture C.2).
+
+**Keep the list tight.** Wildcards such as `http://localhost:5173/**` are
+tempting and are how open redirects happen (architecture E.6). List the two
+paths we actually use.
+
+**Port 5173 is pinned.** `vite.config.js` sets `strictPort: true`, so Vite fails
+loudly rather than silently moving to 5174 — which would break these redirects
+while looking like an auth bug.
+
+### 2. Password policy
+
+**Authentication → Sign In / Providers → Email**, or **Auth → Policies**
+depending on dashboard version.
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Minimum password length | **10** | Architecture checklist item 8. Length beats forced complexity |
+| Required characters | **none** | Complexity rules push people toward `Password1!` and a sticky note |
+| Leaked password protection | **enabled** | Rejects passwords found in known breach corpora. Prevents more real compromises than any complexity rule (architecture E.1) |
+
+> Leaked-password protection may require a paid plan on some tiers. If it is
+> unavailable, record that here and revisit before launch — do not silently skip
+> it.
+
+### 3. Rate limits
+
+**Authentication → Rate Limits**
+
+No change required now. **Record the current values in the table below**, because
+Milestone 8's brute-force tests run against this shared project and could trip
+project-wide limits that affect anyone else using it (architecture E.6, plan
+§5.4).
+
+| Limit | Current value |
+| --- | --- |
+| Sign-ups per hour | *(record)* |
+| Emails per hour | *(record)* |
+| Token refreshes | *(record)* |
+| OTP / verification | *(record)* |
+
+### 4. Email sending — note only, no action
+
+The built-in sender is **rate-limited and intended for testing**. Milestone 2
+needs two or three emails, which is fine.
+
+Custom SMTP (architecture checklist item 10) stays a **Milestone 4 decision**.
+Recording it here so it arrives as a scheduled decision rather than a surprise:
+building registration and password reset means sending many emails in short
+bursts, and hitting the limit looks like "verification is broken" rather than
+"you are rate-limited".
+
+---
+
+## Not configured, and deliberately so
+
+| Thing | Why not |
+| --- | --- |
+| Google / GitHub providers | Social login deferred (architecture 0.2) |
+| MFA | Deferred; the JWT already carries `aal` so it slots in later |
+| Custom SMTP | Milestone 4 decision |
+| Production URLs | Deployment deferred (checklist item 22) |
+| Database tables, RLS, GRANTs | Milestone 3 |
+
+---
+
+## After applying
+
+1. Restart the dev server and confirm the home page still reports **Connected**.
+2. Re-run `GET /auth/v1/settings` and confirm the four defaults above are
+   unchanged.
+3. Fill in the rate-limit table and tick the status line at the top.
+
+Nothing in Milestone 2 exercises the redirect URLs — the login screen is visual
+only and does not authenticate. They are configured now so that the first real
+flow in Milestone 4 fails for genuine reasons rather than setup ones.
