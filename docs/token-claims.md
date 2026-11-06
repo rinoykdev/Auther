@@ -200,16 +200,22 @@ presence alone is never accepted as proof that authentication was recent.
 
 ---
 
-## 6. Cleanup — action required
+## 6. Cleanup — complete (2026-11-06)
 
-One disposable account exists and **cannot be deleted from here**: deletion
-requires the secret key, which is deliberately not available to this project
-(architecture E.5).
+| Account | Status |
+| --- | --- |
+| `+m2test1` | Deleted by the user; **verified** |
+| `+m2probe2` | Deleted by the user; **verified** |
+| `+m2test2`, `+m2test3` | Never created |
 
-**Please delete it:** Supabase dashboard → Authentication → Users →
-`rinoykuniyil+m2test1@gmail.com` → Delete.
+**Verification method.** A sign-in was attempted with the *correct* password for
+each. Both returned `Invalid login credentials`, which for a known-good password
+can only mean the account no longer exists.
 
-`+m2test2` and `+m2test3` were never used; no accounts exist for them.
+That identical response is also account-enumeration resistance working as
+architecture E.6 specifies: the API does not distinguish "no such user" from
+"wrong password". Useful to have observed — it is one of the H.3 Family 3 cases.
 
-Its sessions were already revoked by the sign-out tests, and no password for it
-was ever written down outside a scratchpad file that is not in this repository.
+The throwaway passwords were held only in a scratchpad file outside this
+repository, which has been overwritten and deleted along with the investigation
+scripts. No password was ever printed, committed, or reused.

@@ -115,10 +115,11 @@ client-side check alone does not satisfy E.1, because it is not a boundary.
 H.3) because `auth_time` does not exist. Not urgent — account deletion is
 Milestone 12 — but it should be settled before that milestone starts.
 
-### 🟡 Disposable accounts awaiting deletion
+### ✅ Disposable accounts deleted
 
-`+m2test1` and `+m2probe2`. Deletion requires the secret key, which this project
-deliberately does not hold.
+`+m2test1` and `+m2probe2` were deleted by the user and the deletions verified
+by sign-in attempt with the correct password (both rejected). Investigation
+scripts and the scratchpad credential file have been destroyed.
 
 ---
 
