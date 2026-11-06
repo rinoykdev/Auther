@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# No Docker, no service containers. This project has no local backend
+# (architecture A.5) and the runner needs nothing but Node.
+jobs:
+  verify:
+    name: Lint, build, test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the secret scan can inspect every commit, not just
+          # the tip. A key committed three commits ago is still a leaked key.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and component tests
+        run: npm run test:ci
+
+      # The build runs WITHOUT real credentials, deliberately. Vite does not
+      # execute modules while bundling, so the env guard in supabaseClient.js
+      # does not fire here (docs/setup.md). Placeholders keep the build
+      # honest: if a future change starts requiring real credentials at build
+      # time, this step is where we find out.
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://ci-placeholder.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-not-a-real-key
+
+      - name: Scan built output for secrets
+        run: npm run scan:dist
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No committed env files
+        run: |
+          set -euo pipefail
+          # .env.example is expected and holds placeholders only.
+          if git ls-files | grep -E '^\.env($|\.)' | grep -v '^\.env\.example$'; then
+            echo "::error::A real .env file is tracked. Remove it and rotate anything it held."
+            exit 1
+          fi
+          echo "OK: only .env.example is tracked"
+
+      - name: No secret-shaped strings in tracked files
+        run: |
+          set -euo pipefail
+          # Patterns that must NEVER appear:
+          #   sb_secret_        Supabase secret key (new format)
+          #   service_role      Supabase service-role key or its JWT role claim
+          #   eyJ...            a JWT, which may be a legacy service-role key
+          #
+          # docs/ is excluded: the architecture document discusses these names
+          # at length by design. It is prose about keys, not keys.
+          if git grep -nE '(sb_secret_[A-Za-z0-9_-]{8,}|service_role|eyJ[A-Za-z0-9_-]{30,})' \
+               -- . ':(exclude)docs/**' ':(exclude).github/workflows/ci.yml'; then
+            echo "::error::Secret-shaped string found in a tracked file."
+            exit 1
+          fi
+          echo "OK: no secret-shaped strings"
+
+      - name: History check
+        run: |
+          set -euo pipefail
+          # A key removed in a later commit is still in the history and still
+          # compromised. Deleting it from the working tree is not enough
+          # (architecture E.5) - the only correct response is rotation.
+          if git log -p --all | grep -nE '(sb_secret_[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{40,})' | head -5; then
+            echo "::error::Secret-shaped string found in git history. Rotate the key immediately; removing the file is not sufficient."
+            exit 1
+          fi
+          echo "OK: history clean"
