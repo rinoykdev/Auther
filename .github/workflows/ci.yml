@@ -307,9 +307,17 @@ jobs:
 
       - name: Collect the catalogue snapshot for the parity check
         run: |
-          set -euo pipefail
-          $PSQL -tAf supabase/parity/collect.sql > parity-ci.txt
+          set -uo pipefail
+          # Same error capture as the other psql steps. Three separate steps
+          # have now failed with nothing but an exit code, and each cost a
+          # round trip; a step that can fail should be able to say why.
+          if ! err=$(psql -v ON_ERROR_STOP=1 --no-psqlrc -tAf supabase/parity/collect.sql \
+                       2> >(tee /dev/stderr) > parity-ci.txt); then
+            echo "::error file=supabase/parity/collect.sql::$(echo "$err" | tr '\n' ' ' | head -c 700)"
+            exit 1
+          fi
           echo "Collected $(wc -l < parity-ci.txt) catalogue lines"
+          head -40 parity-ci.txt
 
       # The CI half of the H.6.1 diff. The cloud half is produced by the owner
       # from a local shell, because it needs privileged read access that must

@@ -19,35 +19,35 @@
 
 -- Category 2 — roles. Checked early: a role holding BYPASSRLS in one database
 -- and not the other makes every RLS result incomparable.
-select 'role|' || rolname
-       || '|super='     || rolsuper
-       || '|bypassrls=' || rolbypassrls
-       || '|inherit='   || rolinherit
-       || '|login='     || rolcanlogin
+select 'role|' || rolname::text
+       || '|super='     || rolsuper::text
+       || '|bypassrls=' || rolbypassrls::text
+       || '|inherit='   || rolinherit::text
+       || '|login='     || rolcanlogin::text
   from pg_roles
  where rolname in ('anon','authenticated','service_role','authenticator')
  order by rolname;
 
 -- Category 3 — the full E.4 privilege matrix, table level.
-select 'table_priv|' || grantee || '|' || table_schema || '.' || table_name
-       || '|' || privilege_type
+select 'table_priv|' || grantee::text || '|' || table_schema::text || '.' || table_name::text
+       || '|' || privilege_type::text
   from information_schema.role_table_grants
  where grantee in ('anon','authenticated')
    and table_schema in ('public','auth')
  order by grantee, table_schema, table_name, privilege_type;
 
 -- Category 3 — column level. This is where a too-wide UPDATE hides.
-select 'column_priv|' || grantee || '|' || table_schema || '.' || table_name
-       || '.' || column_name || '|' || privilege_type
+select 'column_priv|' || grantee::text || '|' || table_schema::text || '.' || table_name::text
+       || '.' || column_name::text || '|' || privilege_type::text
   from information_schema.column_privileges
  where grantee in ('anon','authenticated')
    and table_schema = 'public'
  order by grantee, table_name, column_name, privilege_type;
 
 -- Category 4 — the auth.* helpers: identity.
-select 'auth_fn|' || p.proname
+select 'auth_fn|' || p.proname::text
        || '|returns='    || pg_get_function_result(p.oid)
-       || '|secdef='     || p.prosecdef
+       || '|secdef='     || p.prosecdef::text
        || '|search_path='|| coalesce(array_to_string(p.proconfig, ','), 'UNSET')
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'auth' and p.proname in ('uid','jwt','role')
@@ -95,14 +95,14 @@ select 'auth_uid|sub_not_uuid|' || pg_temp.probe_uid();
 reset request.jwt.claims;
 
 -- RLS posture of every table in public.
-select 'rls|' || schemaname || '.' || tablename
-       || '|enabled=' || rowsecurity
+select 'rls|' || schemaname::text || '.' || tablename::text
+       || '|enabled=' || rowsecurity::text
   from pg_tables where schemaname = 'public'
  order by tablename;
 
-select 'policy|' || schemaname || '.' || tablename || '|' || policyname
-       || '|cmd='   || cmd
-       || '|roles=' || array_to_string(roles, ',')
+select 'policy|' || schemaname::text || '.' || tablename::text || '|' || policyname::text
+       || '|cmd='   || cmd::text
+       || '|roles=' || array_to_string(roles::text[], ',')
        || '|using=' || coalesce(qual, 'NONE')
        || '|check=' || coalesce(with_check, 'NONE')
   from pg_policies where schemaname = 'public'
@@ -110,7 +110,7 @@ select 'policy|' || schemaname || '.' || tablename || '|' || policyname
 
 -- Category 1 — the objects the migration created. Checked last here, but it is
 -- the category that invalidates all the others when it differs.
-select 'object|' || n.nspname || '.' || c.relname || '|' || c.relkind
+select 'object|' || n.nspname::text || '.' || c.relname::text || '|' || c.relkind::text
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
  where n.nspname = 'public' and c.relkind in ('r','v','m')
  order by c.relname;
