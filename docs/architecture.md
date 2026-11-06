@@ -62,7 +62,19 @@ replaces expectation with measurement.
 
 Also in revision 5: the Milestone 3 testing approach is settled (pgTAP against a
 pinned PostgreSQL service container in GitHub Actions — H.1, H.6), and five new
-test requirements are added for the `amr` timestamp check (H.3 Family 2).
+test requirements are added for the `amr` timestamp check (H.3 Family 2a).
+
+### Added in revision 6 — three guardrails, approved before Milestone 3
+
+Revision 6 adds no new design. It closes three gaps where an approved intention
+had no mechanism attached, which is the state in which requirements quietly
+expire.
+
+| # | Guardrail | Where |
+| --- | --- | --- |
+| 1 | **Claims are consumed only from a cryptographically verified token.** No authentication timestamp is ever accepted from the client. H.3 Family 2a is split into **parsing tests** (constructed claims, cases 1–5) and a **verification test** (real tokens, case 6), and neither may substitute for the other | C.8.1, H.3 Family 2a, D15 |
+| 2 | **The parity check becomes an operational procedure** — five triggers, four comparison categories, an empty diff as the only pass, and an ordered failure procedure. Required before production release and whenever the bootstrap changes | New H.6.1, H.6 condition 5, D16 |
+| 3 | **D12 stays open on a production release gate.** Credential-stuffing protection is not satisfied and may not be recorded as such — not by documentation, a longer minimum length, or a client-side check | `security.md`, checklist item 8, D12 |
 
 ---
 
@@ -111,7 +123,7 @@ This section is new in revision 2 and governs everything that follows.
 | Admin panel | No admin users exist yet in a core-auth build; the panel is a consumer of roles, not a prerequisite | Route namespace `/admin`, folder `features/admin/`, Forbidden (403) page specified in Section F |
 | Role management (`user_roles`, role assignment, `RoleGuard`) | Nothing in core auth branches on role | Full table and policy design retained in Section D.7 as a ready-to-apply addition; `AuthProvider` exposes a `roles` value that is an empty array until the feature lands |
 | Account deletion | It is the single most dangerous operation in the system and deserves its own milestone with its own test pass | Complete design retained in Sections C.8 and G.3; `accountService.js` is specified but not implemented |
-| Multi-factor authentication (MFA) | Supabase supports it natively; adding it later changes configuration and one screen, not the architecture | The JWT already carries `aal` and `amr`; Section C.9 and the reauthentication design read those claims, so an MFA step slots in without changing the session model. Note MFA makes `amr` multi-entry, which the recency check must already handle (C.8.1, H.3 Family 2) |
+| Multi-factor authentication (MFA) | Supabase supports it natively; adding it later changes configuration and one screen, not the architecture | The JWT already carries `aal` and `amr`; Section C.9 and the reauthentication design read those claims, so an MFA step slots in without changing the session model. Note MFA makes `amr` multi-entry, which the recency check must already handle (C.8.1, H.3 Family 2a) |
 | Social login (Google, GitHub) | Adds provider configuration and callback cases before the core flow is proven | The callback page in Section C.2 is written to handle any PKCE code exchange, not only email confirmation; `authService` gets one extra method |
 | Audit log table, avatar file storage, organisations/teams | Not needed to authenticate anyone | Noted in Section D.8 |
 
@@ -455,11 +467,20 @@ The distinction that matters is unchanged and is the whole point: **which method
 
 **A trap specific to this design.** Because membership and moment now live in one claim, the sentence "use `amr`" and the sentence "don't use `amr`" are both wrong. The correct rule is narrower: *use the timestamp, never the membership, as the recency signal.*
 
-**A second trap, new with MFA.** `amr` is an array. Once MFA exists it will carry more than one entry. The check must read the **most recent timestamp across all entries** and must never assume a single element — code written against today's one-element array will silently read the wrong entry later. This is tested explicitly (H.3 Family 2).
+**A second trap, new with MFA.** `amr` is an array. Once MFA exists it will carry more than one entry. The check must read the **most recent timestamp across all entries** and must never assume a single element — code written against today's one-element array will silently read the wrong entry later. This is tested explicitly (H.3 Family 2a).
 
 **The rule we implement.** The Edge Function:
 
 1. verifies the token server-side (C.8 Step 3.2) — **every claim below is read only from the verified token**, never from a client-supplied copy and never from an unverified decode;
+
+   **The verification boundary (guardrail, revision 6).** Claims are consumed
+   *only* after cryptographic verification has succeeded. Concretely: no request
+   field, header, query parameter or body value may supply an authentication
+   timestamp, and no `jwtDecode`-style parse may feed the recency check. A
+   decode tells you what a token *says*; only verification tells you whether
+   anyone with the signing key said it. These are different operations and the
+   code must not be able to confuse them — the function obtains the claims from
+   the verified-token result object and from nowhere else.
 2. reads the authentication time as **the maximum `timestamp` across all `amr` entries**;
 3. computes `now - thatTimestamp` and rejects with `401 reauthentication_required` if it exceeds the window;
 4. separately reads `amr` **membership** to confirm the authentication *method* is one we accept for deletion, and `aal` to confirm strength. These are independent checks: an acceptable method with a stale timestamp is still a rejection;
@@ -904,6 +925,18 @@ Four named families, each with concrete cases and an explicit pass condition. Th
 
 **Family 2a — the recent-authentication check (`amr[].timestamp`).** Required by revision 5. These guard the specific ways this check fails open; each is a test that must exist before any deletion code ships.
 
+**Two test layers, deliberately separated (guardrail, revision 6).** Cases 1–5
+are **parsing tests**: they feed a *constructed claim object* to the recency
+function and assert how it reads it. They are fast, exhaustive over malformed
+shapes — and they prove **nothing about verification**, because no signature is
+involved at any point. Case 6 is the **verification test**, and it is the one
+that proves the parsing logic is unreachable without a valid signature.
+
+A suite of parsing tests alone is the precise shape of a false sense of safety:
+every malformed-timestamp case passes while the function still happily accepts a
+forged token. Each test must therefore declare which layer it belongs to, and
+neither layer may stand in for the other.
+
 | # | Case | Method | Pass condition |
 | --- | --- | --- | --- |
 | 1 | **Multiple `amr` entries / MFA** | Token whose `amr` holds several entries with different timestamps — e.g. `password` at T−10min and `mfa` at T−1min | The check reads the **maximum** timestamp and accepts. A naive `amr[0]` read would take the stale entry and reject a legitimate user; the inverse ordering must also be tested, where taking the wrong element would wrongly **accept** |
@@ -911,6 +944,7 @@ Four named families, each with concrete cases and an explicit pass condition. Th
 | 3 | **Future timestamp** | `timestamp` set beyond a small clock-skew tolerance ahead of server time | `401`. A future value is not rounded down to "now"; it indicates a forged or broken token |
 | 4 | **Expired five-minute window** | Valid token whose maximum `amr[].timestamp` is older than 5 minutes — and separately, a token **refreshed** after the window elapsed | `401 reauthentication_required` in both. The refresh variant is the one that would have caught the revision-2 error |
 | 5 | **Accepted methods and assurance level** | `amr` listing only a non-accepted method with a *fresh* timestamp; and a user enrolled in MFA presenting `aal1` | Rejected. Asserts the method check, the `aal` check and the recency check are **independent** — a fresh timestamp does not excuse an unacceptable method, and an acceptable method does not excuse a stale timestamp |
+| 6 | **Verification precedes parsing** *(verification layer — not a parsing test)* | Four real HTTP calls to the function: (a) a token with a **fresh** `amr[].timestamp` but an invalid signature; (b) the same payload re-signed with the **wrong key**; (c) a well-formed token with **no** `Authorization` header but an authentication timestamp supplied in the **request body** and, separately, in a header; (d) a valid, verified token with a stale timestamp | `401` in (a), (b) and (c) — and in (c) the supplied timestamp must leave **no trace** in the decision, asserted by the response being identical to the same call without it. (d) returns `401 reauthentication_required`, proving the rejection in (a)–(c) came from **verification**, not from the recency rule. Without (d) the test could pass for the wrong reason |
 
 **Family 3 — Account enumeration (can an outsider learn which emails are registered?)**
 
@@ -993,7 +1027,10 @@ service container in CI reintroduces nothing for anyone working on this project.
    cannot merge.
 5. **A documented periodic parity test** against the Supabase Cloud development
    project, run deliberately rather than on every pull request, to catch drift
-   between the reconstruction and the real platform.
+   between the reconstruction and the real platform. **The procedure — triggers,
+   comparisons, pass condition and failure handling — is H.6.1, and parity
+   verification is required before production release and whenever the bootstrap
+   changes.**
 6. **No Supabase secret or service-role key in GitHub Actions.** This is what the
    chosen option buys: the CI database is disposable and local to the run, so
    there is no credential to leak from a public repository.
@@ -1011,6 +1048,81 @@ Docker, which is contrary to A.5's spirit though not its letter — A.5 removed
 Docker as a requirement, not as a possibility. Mitigation: CI is the enforcement
 point, and anyone wanting a local run can point `psql` at the development project
 with pgTAP enabled instead, needing no Docker.
+
+### H.6.1 The parity-check procedure (guardrail, revision 6)
+
+Condition 5 of H.6 requires a parity test. A requirement without a procedure is a
+requirement that quietly never runs, so this section defines it operationally:
+when it fires, what it compares, what counts as a pass, and what happens when it
+fails.
+
+**What parity means here.** The CI database is a *reconstruction* of the parts of
+Supabase that our policies depend on. Parity is the claim that a GRANT-and-RLS
+result observed in CI would be the same result in Supabase Cloud. The check
+exists to test that claim rather than assume it.
+
+**Triggers — all of them mandatory**
+
+| # | Trigger | Why |
+| --- | --- | --- |
+| P1 | **Before any production release** | The release is the moment the claim stops being theoretical |
+| P2 | **Whenever the database bootstrap changes** — the pinned image version, the role definitions, the `auth` schema, or any `auth.*` helper | These *are* the reconstruction. A change here is a change to what CI believes Supabase is |
+| P3 | **Whenever a migration adds a table, policy, GRANT or `SECURITY DEFINER` function** | New objects are where new divergence lands |
+| P4 | **On a fixed schedule — monthly** | Supabase upgrades its platform on its own timetable, with no event we can hook. Drift can appear with no commit of ours attached |
+| P5 | **Whenever a pgTAP test's result changes without a corresponding code change** | The classic drift symptom, and the easiest to explain away |
+
+P1–P3 are tied to events we control, so they are the enforceable ones. P4 exists
+precisely because P1–P3 cannot see a change made on Supabase's side.
+
+**What is compared.** Four categories, in increasing order of how often they are
+the cause of a surprise:
+
+| # | Category | Compared how |
+| --- | --- | --- |
+| 1 | **Migrations applied** | Same ordered migration list, same checksums, applied to both databases. A divergence here invalidates everything below it, so it is checked first |
+| 2 | **Roles** | `anon`, `authenticated`, `service_role`: existence, `rolbypassrls`, `rolsuper`, `rolinherit`, and membership. A role holding `BYPASSRLS` in one database and not the other makes every RLS test meaningless |
+| 3 | **Privileges** | The full E.4 matrix read from `information_schema.role_table_grants` and `column_privileges`, for both roles, on every table in `public` — table *and* column level |
+| 4 | **`auth.*` helper functions** | `auth.uid()`, `auth.jwt()`, `auth.role()`: existence, return type, `prosecdef`, and configured `search_path`. Then **behaviour**, which is the part that matters: each is called under a set of fixed JWT claim fixtures — a normal claim set, an absent claim, a `null` claim, and a malformed JSON claim — and the returned values must match exactly, `NULL` included |
+
+Category 4 is the sharpest edge. A stub `auth.uid()` that returns `NULL` where
+Supabase's raises, or vice versa, changes what `(select auth.uid()) = id`
+evaluates to in exactly the null case a policy is most likely to get wrong.
+
+**Expected result.** A machine-comparable report from each database, diffed. The
+pass condition is an **empty diff** across all four categories. A human reading
+two outputs side by side is not the procedure — a difference in one column of one
+role is exactly what the eye skips.
+
+**How it runs, and the credential rule.** Against Supabase Cloud the check needs
+privileged read access, which means it is run **manually by the owner** from a
+local shell, never from GitHub Actions. H.6 condition 6 is unaffected and
+unweakened: no Supabase credential enters CI. The CI half of the comparison is
+produced by the normal workflow and downloaded as an artifact; the cloud half is
+produced locally. The script reads catalogues only and writes nothing.
+
+**Failure handling — an ordered procedure, because the tempting response is the wrong one**
+
+1. **Record the diff** in the milestone test report, verbatim. Not summarised.
+2. **Classify it.** Either the reconstruction is wrong (our bootstrap is behind or
+   mistaken) or the cloud project has drifted (a dashboard change, a Supabase
+   platform upgrade). The remedy differs, so the classification comes first.
+3. **Treat every pgTAP result covering the diverged object as unproven** until the
+   diff is closed. This is the step with teeth: a passing suite over a diverged
+   object is not evidence, and recording it as such is how a hole ships.
+4. **Fix at the source.** If the bootstrap is wrong, correct the bootstrap and
+   re-run the whole pgTAP suite — not just the failing test. If the cloud project
+   drifted through a dashboard change, revert it and record it in
+   `supabase-config.md`, since a dashboard change is invisible to code review.
+5. **If the divergence is in the platform itself** and cannot be reconciled,
+   **block the release** and record it as an accepted limitation with its own
+   open decision, in the manner of D12. It does not get closed by being
+   understood.
+
+**What the procedure cannot do.** It compares the objects we thought to compare.
+A divergence in PostgREST's own behaviour — how it switches role, how it parses a
+JWT — is outside the database and outside this check entirely. The API-level
+security suite (H.1) runs against the real cloud project for that reason, and the
+two are complements, not substitutes.
 
 ### H.5 Process
 
@@ -1058,7 +1170,9 @@ Items already settled by your review are marked **[confirmed]** and need no furt
 - [ ] **5. Router:** React Router for page navigation (recommended).
 - [ ] **6. Session flow:** PKCE with browser storage and an XSS-focused mitigation plan, instead of a server-rendered cookie setup (recommended for simplicity).
 - [ ] **7. Email link style:** PKCE code links by default, with cross-device failure handled as a clear error plus resend; token-hash links (`verifyOtp`) with a custom template as the fallback if users hit it often (Section C.2). Confirm, or ask for token-hash from the start.
-- [x] **8. Password policy:** **minimum 10 characters**, no forced complexity rules. Applied and verified 2026-11-06. **Supabase's leaked-password check could NOT be enabled — it is paid-plan only (E.1). Recorded as an unmet production security requirement, not as satisfied.** **[confirmed by your review]**
+- [x] **8. Password policy:** **minimum 10 characters**, no forced complexity rules. Applied and verified 2026-11-06. **Supabase's leaked-password check could NOT be enabled — it is paid-plan only (E.1). Recorded as an unmet production security requirement, not as satisfied.**
+
+  **Credential-stuffing protection is therefore NOT satisfied, and D12 stays open on the production release gate (`security.md`) until it is.** It is not closed by being documented, by raising the password length, or by adding a client-side breach check. **[confirmed by your review; gate reaffirmed revision 6]**
 - [ ] **9. Profile fields:** `display_name` and `avatar_url` only. Confirm, or tell me what else you need — noting that anything mirrored from `auth.users`, especially email, needs a deliberate decision (Section D.2).
 - [ ] **10. Production email:** Supabase's default sender during development, a custom SMTP provider before launch (recommended). Which provider, if any, do you have in mind?
 - [x] **11. Environments:** **Supabase Cloud** for all backend services, with a dedicated **development project** and the React frontend running locally at `localhost:5173`. A separate production project is created when deployment is addressed. **Docker is not a project dependency**, and there is no local Supabase stack (A.5). **[confirmed by your review]**

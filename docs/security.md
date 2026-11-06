@@ -100,6 +100,27 @@ it. Options and the production requirement are in `supabase-config.md`.
 
 ---
 
+## Production release gate
+
+**Nothing here may be ticked by explanation.** An item closes when the control
+exists and has been tested — not when the reason it is missing is well
+understood. This list is the reason a limitation cannot quietly become a
+footnote between now and launch.
+
+| # | Requirement | Status | Closes when |
+| --- | --- | --- | --- |
+| **D12** | **Credential-stuffing / leaked-password protection** (architecture E.1) | 🔴 **OPEN — not satisfied** | Supabase's leaked-password check is enabled on a paid plan, **or** a server-side equivalent rejects breached passwords at the boundary. **Neither a longer minimum length nor a client-side breach check closes this**, and neither may be recorded as mitigation |
+| **P1** | **Supabase Cloud parity verification** (architecture H.6.1) | ⬜ Not yet due — first runs before the first release | The parity check runs against the production project with an **empty diff** across migrations, roles, privileges and `auth.*` helpers |
+| E.6 | Security headers — CSP, `frame-ancestors`, `Referrer-Policy` | ⬜ Deferred with hosting (checklist item 22, Milestone 14) | Headers are configured at the hosting layer and verified on the deployed site |
+| H.3 | All four security test families pass against the production configuration | ⬜ Milestone 8 | Every family runs green, with the test report recorded |
+
+**D12 is the one at risk of being lost**, because it is the only item here whose
+blocker is commercial rather than technical — and those are the items that get
+reclassified as acceptable on the day of a release. It stays red until the
+control exists.
+
+---
+
 ## If a key is exposed
 
 1. **Rotate it in the Supabase dashboard immediately.** Do this first.

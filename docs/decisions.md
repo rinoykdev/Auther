@@ -132,6 +132,11 @@ trivially bypassed.
 **Before production:** enable the paid plan, or implement a server-side
 equivalent. Tracked in `security.md` and `supabase-config.md`.
 
+**Status (reaffirmed, revision 6): OPEN on the production release gate.**
+Credential-stuffing protection must not be recorded as satisfied — not by
+documentation, not by a longer minimum length, not by a client-side check.
+D12 closes only when a real boundary rejects breached passwords.
+
 ---
 
 ## Testing
@@ -174,6 +179,43 @@ on a shared cloud backend are slow, flaky, and mutate state others can see.
 
 ---
 
+### D15 — Claims are consumed only from a verified token · **approved**, revision 6
+
+The recent-authentication check reads its claims **exclusively** from the result
+of a successful server-side verification. No authentication timestamp may be
+accepted from a request body, header or query parameter, and no decode-only
+parse may feed the check.
+
+*Why this is a separate decision and not an implementation detail:* a decode and
+a verification return the same-looking object, so the mistake is invisible at the
+call site. E.2's finding makes the consequence concrete — a signed-but-revoked
+token still parses perfectly.
+
+*Test consequence:* H.3 Family 2a is split into **parsing tests** (cases 1–5,
+constructed claim objects, no signature involved) and a **verification test**
+(case 6, real HTTP calls with invalid, wrongly-signed and absent tokens). Neither
+layer may substitute for the other; a full set of parsing tests proves nothing
+about verification.
+
+### D16 — The parity check is an operational procedure, not an aspiration · **approved**, revision 6
+
+H.6 condition 5 required a parity test. Revision 6 defines it: five triggers
+(pre-release, bootstrap change, new database objects, monthly, and an unexplained
+pgTAP result change), four comparison categories (migrations, roles, privileges,
+`auth.*` helper behaviour under fixed claim fixtures), an **empty diff** as the
+only pass, and an ordered failure procedure whose third step is the load-bearing
+one: **every pgTAP result covering a diverged object is unproven until the diff
+is closed**.
+
+*Credential rule unchanged:* the cloud half is run manually by the owner from a
+local shell. **No Supabase credential enters GitHub Actions** (H.6 condition 6).
+
+*Limit stated plainly:* it compares the objects we thought to compare, and
+PostgREST's own behaviour is outside it. The API-level suite against the real
+cloud project is the complement.
+
+---
+
 ## Still open
 
 | # | Decision | Needed by | Notes |
@@ -183,3 +225,4 @@ on a shared cloud backend are slow, flaky, and mutate state others can see.
 | O3 | Email-dependent E2E testing | Milestone 4 | No automated inbox exists; deliberately not introduced in Milestone 2 |
 | O4 | Additional roles beyond `user` / `admin` | Milestone 10 | |
 | O5 | Deployment target and the E.6 headers | Milestone 14 | Deferred by D2 |
+| O6 | Pinned `supabase/postgres` image version for CI | **Milestone 3, before the workflow is written** | H.6 condition 1 requires an exact version. Which version is a Milestone 3 decision, recorded here so it is chosen rather than defaulted |
