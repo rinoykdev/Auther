@@ -293,7 +293,21 @@ real `signUp`.
 
 ## 6. Step 5 — GitHub Actions integration
 
-A third job, `database`, alongside the existing `verify` and `secrets`:
+**Revised in execution — decision D20.** This section originally specified a
+pinned `supabase/postgres` service container. That image ships an `auth` schema
+owned by `supabase_admin`, and the connecting `postgres` role is neither a
+superuser nor a member of it, so the bootstrap cannot create `auth.users` and
+cannot grant itself in. Three CI runs with diagnostics established that rather
+than assuming it.
+
+PostgreSQL now runs **on the runner itself**, with pgTAP from the distribution
+packages, where we are a real superuser. Still no Docker — if anything closer to
+A.5 than the original. What it costs is the base-role fidelity the image was
+chosen for, which makes the H.6.1 parity check load-bearing rather than
+advisable. **D20 needs your approval**, because it changes approved H.6
+condition 1.
+
+The job, as it now stands — a third one alongside `verify` and `secrets`:
 
 ```yaml
   database:
