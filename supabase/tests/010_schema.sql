@@ -46,18 +46,30 @@ select is(
 -- far cheaper than discovering it then.
 select col_is_fk('public','profiles','id','profiles.id is a foreign key');
 select col_is_fk('public','user_roles','user_id','user_roles.user_id is a foreign key');
-select is(
-  (select confdeltype from pg_constraint
+select ok(
+  (select bool_or(pg_get_constraintdef(oid) like '%ON DELETE CASCADE%')
+     from pg_constraint
     where conrelid = 'public.profiles'::regclass and contype = 'f'),
-  'c'::"char", 'profiles.id cascades on delete');
-select is(
-  (select confdeltype from pg_constraint
-    where conrelid = 'public.user_roles'::regclass
-      and contype = 'f' and conname like '%user_id%'),
-  'c'::"char", 'user_roles.user_id cascades on delete');
+  'profiles.id cascades on delete');
 
--- The length check exists and actually bites.
-select has_check('public','profiles','profiles has a CHECK constraint');
+-- bool_or over the matching constraints rather than a bare subquery: two
+-- foreign keys on user_roles (user_id and granted_by) and a scalar subquery
+-- would raise "more than one row" instead of asserting anything.
+select ok(
+  (select bool_or(pg_get_constraintdef(oid) like '%ON DELETE CASCADE%')
+     from pg_constraint
+    where conrelid = 'public.user_roles'::regclass and contype = 'f'
+      and conname like '%user_id%'),
+  'user_roles.user_id cascades on delete');
+
+-- The NAMED length check, not merely "some check exists" — the name is what a
+-- later migration would have to go out of its way to remove.
+select ok(
+  exists (select 1 from pg_constraint
+           where conrelid = 'public.profiles'::regclass
+             and contype = 'c'
+             and conname = 'profiles_display_name_length'),
+  'the display_name length CHECK exists by name');
 insert into auth.users (id, email)
 values ('00000000-0000-0000-0000-0000000000aa','len@test.dev');
 

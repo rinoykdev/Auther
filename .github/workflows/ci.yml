@@ -259,10 +259,20 @@ jobs:
           #
           # `|| true` on every grep: a filter that finds nothing must not
           # itself fail the step and hide the rest.
-          grep -v -E '^\s*ok [0-9]+' pgtap.log | grep -v '^\s*$' | head -60 \
+          grep -v -E '^\s*ok [0-9]+' pgtap.log | grep -v '^\s*$' | head -40 \
             | while IFS= read -r line; do
                 echo "::error::${line}"
               done
+
+          # pg_prove reports a file that DIES as "Dubious, test returned N"
+          # and SWALLOWS the SQL error that killed it - so the one piece of
+          # information needed is the one it does not print. Re-running the
+          # file through psql prints `ERROR: ... LINE n:` directly.
+          for f in supabase/tests/*.sql; do
+            if ! out=$(psql --no-psqlrc -v ON_ERROR_STOP=1 -f "$f" 2>&1 >/dev/null); then
+              echo "::error file=$f::$(echo "$out" | tr '\n' ' ' | head -c 700)"
+            fi
+          done
 
           echo "::error::pgTAP suite failed - see the annotations above and the pgtap-log artifact"
           exit 1
