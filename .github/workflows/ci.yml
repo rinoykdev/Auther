@@ -5,12 +5,12 @@ on:
   push:
     branches: [main]
 
-# Action versions: v5 across the board. v4 runs on Node 20, which GitHub has
-# deprecated and now force-runs on Node 24 with a warning on every run; v5 is
-# the release that moved to Node 24 properly. v6 and v7 exist for all three
-# actions, but jumping two further majors means absorbing behaviour changes
-# that have nothing to do with the warning being fixed. Revisit deliberately,
-# not under deprecation pressure.
+# Action versions. v4 ran on Node 20, which GitHub force-runs on Node 24 with
+# a warning every run. checkout and setup-node went quiet at v5.
+# upload-artifact did NOT - the warning named `upload-artifact@v5` explicitly
+# afterwards, so that one is on v7, the first release that actually moved.
+# Worth recording: "bump the major" is not the same as "fixed", and the only
+# way to tell was to read the next run's warnings rather than assume.
 #
 # A.5 removed Docker as a DEVELOPER-MACHINE dependency. GitHub Actions runners
 # ship with Docker already, so the `database` job below runs a disposable
@@ -259,19 +259,17 @@ jobs:
           #
           # `|| true` on every grep: a filter that finds nothing must not
           # itself fail the step and hide the rest.
-          {
-            grep -F 'not ok' pgtap.log || true
-            grep -E 'Failed test|Looks like you|^Result:|^Files=' pgtap.log || true
-          } | head -40 | while IFS= read -r line; do
-            [ -n "$line" ] && echo "::error::${line}"
-          done
+          grep -v -E '^\s*ok [0-9]+' pgtap.log | grep -v '^\s*$' | head -60 \
+            | while IFS= read -r line; do
+                echo "::error::${line}"
+              done
 
           echo "::error::pgTAP suite failed - see the annotations above and the pgtap-log artifact"
           exit 1
 
       - name: Upload the pgTAP log
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pgtap-log
           path: pgtap.log
@@ -306,7 +304,7 @@ jobs:
       # The CI half of the H.6.1 diff. The cloud half is produced by the owner
       # from a local shell, because it needs privileged read access that must
       # never enter CI (H.6 condition 6).
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: parity-ci
           path: parity-ci.txt
