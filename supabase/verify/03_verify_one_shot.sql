@@ -3,7 +3,7 @@
 -- =============================================================================
 -- The Supabase SQL editor shows only the LAST statement's result, so an
 -- 11-query script reports one answer and silently discards ten. This collapses
--- all of them into one result set: 11 rows, each with its own pass/fail.
+-- all of them into one result set: 13 rows, each with its own PASS/FAIL.
 --
 -- Read-only. Creates nothing, changes nothing.
 --
