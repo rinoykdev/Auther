@@ -385,3 +385,33 @@ argued: `025_default_privileges.sql` (CI) and `verify/02_default_acl_probe.sql`
 real ACLs. A **NULL `proacl` is the failure signal** — it means no entry was
 recorded, so the hardwired `EXECUTE TO PUBLIC` stands. Same trap D-era `050`
 was rewritten to catch.
+
+### D22 — "This email already exists" was considered and declined · **decided**, 2026-11-13
+
+Raised as a product request: show an explicit "an account with this email
+already exists" on the signup form. **Declined**, upholding requirement 3.
+
+*It is cheap to build.* `signUp` returns `data.user.identities === []` for an
+address with a confirmed account — no extra request, no database change, no
+Supabase configuration change. The absence of this message is therefore a
+decision, **not** an unimplemented feature, and the uniform response is not an
+oversight to be tidied away.
+
+*Why declined.* It turns the signup form into a membership oracle: addresses
+can be tested one at a time, by script, to learn which are registered. That
+yields a harvestable customer list and feeds credential stuffing — the D12 gap
+that remains open. Reversing this would mean adding a CAPTCHA to the
+production release gate to keep the oracle from being automated.
+
+*The UX cost is real and is paid elsewhere.* Check Your Email states that no
+new email is sent to an already-registered address, and offers sign-in and
+password reset unconditionally. That covers the stuck user without confirming
+which case they are in.
+
+*What would reopen this:* a support burden showing users genuinely stuck at
+registration, or a decision that enumeration is acceptable for this
+deployment. Either is a legitimate reversal — it needs a CAPTCHA alongside it,
+and this entry amended rather than ignored.
+
+*Not a defect:* Google, Slack and Shopify all disclose this deliberately. The
+choice here is for Auther, not a judgement that disclosure is always wrong.
