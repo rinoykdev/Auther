@@ -126,10 +126,21 @@ depending on dashboard version.
 | Minimum password length | **10** | Architecture checklist item 8. Length beats forced complexity |
 | Required characters | **none** | Complexity rules push people toward `Password1!` and a sticky note |
 | Leaked password protection | **enabled** | Rejects passwords found in known breach corpora. Prevents more real compromises than any complexity rule (architecture E.1) |
+| **Secure password change** | **ON** | Observed in the dashboard by the user, 2026-11-13. A password change from a session older than 24 hours requires an emailed reauthentication code (architecture C.7). Governs Milestone 7 §3.4 |
 
 > Leaked-password protection may require a paid plan on some tiers. If it is
 > unavailable, record that here and revisit before launch — do not silently skip
 > it.
+
+> **Secure password change is ON, and the 24-hour window is not configurable.**
+> GoTrue decides reauthentication from the age of the *session*, not from the
+> age of the last authentication, and that threshold is hardcoded. Nothing in
+> this project can shorten it, lengthen it, or read it from a token. See
+> `milestone-7-plan.md` §3.4.
+>
+> Not to be confused with **require current password**, a *separate* setting
+> that asks for the existing password instead of an emailed code. Its state on
+> this project is **unverified** — Milestone 7 step 1 checks it.
 
 ### 3. Rate limits
 

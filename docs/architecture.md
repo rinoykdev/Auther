@@ -488,7 +488,7 @@ Because we turn on **"Confirm email"** in Supabase settings, users cannot log in
 ### C.7 Profile and credential changes (in scope)
 
 - **Profile update:** logged-in user edits display name and similar fields. Saved to `profiles`, protected by column grants and RLS.
-- **Change password:** requires an active session; calls `updateUser`. If Supabase's "secure password change" option is enabled, the user must have authenticated recently, and `reauthenticate()` supplies a nonce by email when they have not. We will enable this option; it is the same recency principle as C.8, provided natively.
+- **Change password:** requires an active session; calls `updateUser`. If Supabase's "secure password change" option is enabled, the user must have authenticated recently, and `reauthenticate()` supplies a nonce by email when they have not. **This option is ON** on the development project, confirmed in the dashboard 2026-11-13; it is the same recency principle as C.8, provided natively. Note the difference from C.8, which matters: GoTrue measures the age of the **session**, hardcoded at 24 hours, not the age of the last authentication, and no token claim exposes it. The app therefore attempts the change and reacts to `reauthentication_needed` rather than predicting it (`milestone-7-plan.md` §3.4).
 - **Change email:** calls `updateUser`; by default Supabase sends a confirmation to both the old and the new address, and the change takes effect only when both are confirmed. We keep that default — the email to the old address is what protects a user whose session is stolen.
 
 ### C.8 Account deletion (deferred; design corrected in this revision)
