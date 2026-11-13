@@ -506,22 +506,24 @@ old enough by step 9.
 | **D-D** ✅ | **The typed password lives in component memory only.** Never storage, URL or route state |
 | **D-E** ✅ | **M7 may close with the aged-session cloud test recorded as ⬜ unexercised,** provided the unit tests and the other acceptance criteria pass |
 
-### Open — raised by the verification below
+### Approved 2026-11-13 — D-F
 
-**D-F · How is `email_exists` shown on the change-email form?**
-Source reading (V4) shows that changing to an address already registered
-returns `422 email_exists`. **This is a membership oracle** — the same class of
-thing H.3 Family 3 exists to close — but reachable only by an authenticated
-user, one address at a time, against a rate limit.
+**D-F · `email_exists` on the change-email form.** Source reading (V4) shows
+that changing to an already-registered address returns `422 email_exists`. It
+cannot be suppressed — the server refuses, so the form must say something or it
+appears broken.
 
-It cannot be suppressed: the server refuses, so the form must say *something*
-or it appears broken.
+**Approved wording, to be used verbatim:**
 
-*Recommendation:* map it to **"That address can't be used. Try a different
-one."** — true, actionable, and it does not state that an account exists. A
-determined signed-in attacker can still infer it; the aim is to avoid handing
-it over in plain words, not to pretend the inference is impossible. Record the
-residual exposure in `security.md` rather than claim it is closed.
+> **That address can't be used. Try a different one.**
+
+True, actionable, and it does not state that an account exists. **It does not
+eliminate the inference** — a signed-in user can still read the refusal and
+conclude the address is probably registered. That residual is recorded in
+`security.md` as an accepted limitation, with the four things that limit it
+(authentication required, one address per attempt, rate limited, attributable)
+and an explicit instruction that **no document may claim account enumeration is
+fully prevented**.
 
 ---
 

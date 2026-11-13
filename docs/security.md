@@ -100,6 +100,70 @@ it. Options and the production requirement are in `supabase-config.md`.
 
 ---
 
+## Known limitation: email-membership inference on email change
+
+**Reduced, not eliminated.** Recorded here because the wording that reduces it
+could easily be mistaken for a fix.
+
+### What the system does well
+
+Sign-up, login and password reset are all designed so that **no response
+distinguishes a registered address from an unregistered one**. `errorMessages.js`
+collapses every credential failure into one string; `SignUpPage` ignores
+`data.user.identities` entirely, even though it marks the duplicate case;
+`CheckEmailPage` is phrased so that every line is true for both users. That is
+architecture H.3 Family 3, and it holds.
+
+### Where it does not hold
+
+**Changing an email address to one that is already registered.** Supabase Auth
+refuses with `422 email_exists` — verified in the `supabase/auth` source
+(`internal/api/user.go`, read 2026-11-13), where the duplicate check runs before
+the update and returns a distinct error code.
+
+**We cannot suppress it.** The server refuses the change, so the form has to say
+something or it appears broken. There is no third option in which the user is
+told nothing and the product still works.
+
+### What we do instead
+
+One fixed message, approved as decision **D-F**:
+
+> **"That address can't be used. Try a different one."**
+
+It is true, it is actionable, and it does not state that an account exists.
+
+### The residual exposure, stated plainly
+
+**A signed-in user can still infer membership.** They type an address, read the
+refusal, and conclude the address is probably registered. The message does not
+confirm it — "can't be used" is also what a malformed or blocked address would
+produce — but the inference is available and we are not pretending otherwise.
+
+What limits it is **not** the wording:
+
+| | |
+| --- | --- |
+| **Authentication required** | The attacker must hold a confirmed account. Anonymous enumeration, the cheap kind, is not possible |
+| **One address per attempt** | No batch interface exists |
+| **Rate limited** | The attempt goes through Supabase Auth's limits |
+| **Self-identifying** | The attempts are attached to a real account and appear in the audit log |
+
+**This is an accepted residual, not a closed issue.** Three things follow:
+
+1. **No document, commit message or release note may claim that account
+   enumeration is fully prevented.** The accurate claim is that the *sign-up,
+   login and reset* flows do not disclose membership, and that email change
+   leaves an authenticated, rate-limited inference.
+2. If `email_exists` ever becomes reachable from an **unauthenticated** path,
+   this stops being a residual and becomes a defect.
+3. It is deliberately **not** on the production release gate below. The gate is
+   for controls that must exist before launch; this is a limitation accepted
+   with its reasons recorded. Writing it here rather than there is a judgement
+   that it is tolerable — not an oversight, and reversible if you disagree.
+
+---
+
 ## Production release gate
 
 **Nothing here may be ticked by explanation.** An item closes when the control

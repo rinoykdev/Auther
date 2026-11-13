@@ -6,7 +6,7 @@ Awaiting your approval. **Nothing in this file has been built.**
 | --- | --- |
 | Plan | `milestone-7-plan.md` (revised 2026-11-13) |
 | Approved decisions | D-A, D-B, D-C, D-D, D-E — see `decisions.md` D24 |
-| Open decision | **D-F** — `email_exists` wording on the change-email form |
+| Open decisions | **None.** D-F approved 2026-11-13 |
 | Blocked on | **V1** — the reauthentication email template (dashboard, yours) |
 | 🔴 Still open | **D12 — no breached-password protection. M7 does not close it** |
 
@@ -27,7 +27,6 @@ Awaiting your approval. **Nothing in this file has been built.**
       testing.
 - [ ] **Email OTP expiry value.** Read it; it is also the reauthentication code's
       lifetime (V3). The UI states this number.
-- [ ] **D-F approved.**
 - [ ] **Schedule the aged session.** Sign in on a dedicated browser profile and
       leave it. It must be >24h old by step 9, or test 3 closes as ⬜ under D-E.
 - [ ] Record V1 and the expiry value in `supabase-config.md`.
@@ -158,7 +157,24 @@ this section.
 - [ ] `reauthentication_needed` → a sensible string **as a safety net only**.
       It should never render; §1.1 consumes it first. The entry exists so an
       unhandled escape reads sensibly instead of hitting the generic fallback.
-- [ ] `email_exists` → per **D-F**, pending approval.
+- [ ] `email_exists` → **this exact string, approved as D-F:**
+
+      ```
+      That address can't be used. Try a different one.
+      ```
+
+      Not paraphrased, not softened, not expanded with a hint. The wording is
+      the control; a helpful addition such as "try signing in instead" would
+      restore the disclosure it exists to avoid. The residual inference is
+      recorded in `security.md` — **do not describe this as closing
+      enumeration.**
+
+      ⚠️ **The apostrophe is a trap.** The string lives in `errorMessages.js`,
+      a plain `.js` module, so it is written literally: `"That address can't be
+      used. Try a different one."` It is **not** JSX and must **not** gain an
+      `&apos;` — other files use that escape because oxlint flags bare
+      apostrophes *in JSX text*, and copying the habit here would render the
+      entity as visible characters. The test asserts the rendered text.
 - [ ] Already mapped, no change: `same_password`, `weak_password`,
       `over_email_send_rate_limit` — the last is **newly reachable** here.
 
@@ -188,7 +204,7 @@ this section.
 **Change email**
 - [ ] invalid address rejected client-side
 - [ ] success states that **both** addresses must confirm
-- [ ] `email_exists` maps per D-F
+- [ ] `email_exists` renders **the exact D-F string**, asserted character-for-character
 - [ ] ❗ **`requestReauthentication` is never called** (V4)
 
 **Change password — fast path**

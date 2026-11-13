@@ -474,3 +474,37 @@ simply cannot change their password.
 **Not closed by any of this: 🔴 D12.** Reauthentication proves *who* is setting
 a password. It says nothing about *what* they set it to. M7 adds a second entry
 point for a breached password.
+
+---
+
+### D25 — `email_exists` wording on email change · **APPROVED**, 2026-11-13
+
+Source reading (`internal/api/user.go`, `supabase/auth@master`) showed that
+`updateUser({ email })` with an already-registered address returns
+`422 email_exists`. The server refuses, so the form must say something.
+
+**Approved wording, verbatim and not to be paraphrased:**
+
+> **That address can't be used. Try a different one.**
+
+*Why this and not silence:* silence is unavailable. The change does not happen,
+so a form that says nothing looks broken.
+
+*Why this and not "that email is already registered":* the second sentence
+hands over membership in plain words. The approved string is true of a
+registered address, a malformed one and a blocked one alike.
+
+*What it does NOT do.* It does not eliminate the inference. A signed-in user
+can read the refusal and conclude the address is probably registered. What
+limits the exposure is the surrounding shape, not the sentence: authentication
+is required, attempts are one-at-a-time, rate-limited, and attributable to a
+real account in the audit log.
+
+**Recorded as an accepted residual in `security.md`**, together with an
+explicit instruction: **no document, commit message or release note may claim
+that account enumeration is fully prevented.** The accurate claim is that
+sign-up, login and password reset disclose nothing — which remains true and
+tested — and that email change leaves an authenticated, rate-limited inference.
+
+If `email_exists` ever becomes reachable from an unauthenticated path, this
+stops being a residual and becomes a defect.
