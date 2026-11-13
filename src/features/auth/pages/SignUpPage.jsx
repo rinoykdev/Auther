@@ -64,6 +64,19 @@ function SignUpPage() {
     }
 
     setBusy(true)
+    // Only `error` is read. `data` is deliberately discarded.
+    //
+    // For an address that already has a confirmed account, Supabase returns NO
+    // error and creates nothing — but it does mark the case, as
+    // `data.user.identities === []`. Branching on that to show a different
+    // message, a different screen, or even a different delay would rebuild the
+    // account-enumeration oracle that the uniform response exists to close
+    // (H.3 Family 3): type an address, observe the difference, learn whether
+    // it is registered.
+    //
+    // The duplicate case is handled by WORDING that is true either way, plus
+    // sign-in and password-reset links offered unconditionally, on Check Your
+    // Email. Not by detection here.
     const { error } = await signUp({
       email: values.email,
       password: values.password,

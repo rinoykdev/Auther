@@ -10,6 +10,32 @@ import { useAuth } from '../hooks/useAuth'
  * Reached after sign-up. There is no session at this point and the account is
  * unconfirmed — that is requirement 7 working, not a problem to route around.
  *
+ * =============================================================================
+ * THIS SCREEN IS REACHED BY TWO DIFFERENT USERS AND MUST NOT TELL THEM APART
+ * =============================================================================
+ * With email confirmation enabled, signUp for an address that ALREADY has a
+ * confirmed account returns no error, creates nothing, and sends nothing. The
+ * caller cannot distinguish it from a real registration — deliberately, and we
+ * must not undo that.
+ *
+ * (`data.user.identities === []` does in fact mark the duplicate case. Reading
+ * it to vary this screen would hand back the membership oracle H.3 Family 3
+ * exists to close: type an address, see which screen you get, learn whether it
+ * is registered. SignUpPage therefore ignores `data` entirely.)
+ *
+ * So every line here must be TRUE IN BOTH CASES. That rules out "We've sent a
+ * confirmation link to you", which is false for the duplicate — no email was
+ * sent — and is the kind of false reassurance that leaves someone waiting for
+ * a message that is never coming.
+ *
+ * The conditional phrasing is doing real work. It is not hedging for its own
+ * sake, and it should not be "tidied up" into a definite claim.
+ *
+ * The way OUT for the user who already has an account is the navigation: sign
+ * in, or reset the password. Both are offered unconditionally, because
+ * offering them only to duplicates would be the same oracle by another route.
+ * =============================================================================
+ *
  * The resend button has a COOLDOWN because the built-in Supabase sender is
  * rate-limited (checklist item 10). Without it, an impatient user clicks four
  * times, hits the project-wide limit, and then cannot receive the email they
@@ -59,17 +85,22 @@ function CheckEmailPage() {
         <Alert tone="info">
           {email ? (
             <>
-              We&apos;ve sent a confirmation link to{' '}
-              <span className="font-semibold">{email}</span>. Open it to
-              activate your account.
+              If <span className="font-semibold">{email}</span> still needs
+              confirming, a link is on its way. Open it to activate your
+              account.
             </>
           ) : (
             <>
-              We&apos;ve sent you a confirmation link. Open it to activate your
-              account.
+              If that address still needs confirming, a link is on its way.
+              Open it to activate your account.
             </>
           )}
         </Alert>
+
+        <p className="text-[0.95rem] text-ink-900/80">
+          Already registered with this address? No new email is sent — sign in
+          below, or reset your password if you&apos;ve forgotten it.
+        </p>
 
         <p className="text-[0.95rem] text-ink-900/80">
           The link opens in this browser. If you open it on another device,
@@ -102,16 +133,29 @@ function CheckEmailPage() {
           </button>
         )}
 
-        <p className="text-center text-[0.95rem] text-ink-900/80">
-          Wrong address?{' '}
-          <Link to="/signup" className="font-semibold text-blue-600 hover:underline">
-            Sign up again
+        <div className="space-y-3 border-t border-slate-200 pt-6">
+          <Link
+            to="/login"
+            className="block w-full rounded-full bg-ink-900 py-4 text-center text-base font-bold text-white hover:bg-ink-900/90"
+          >
+            Go to sign in
           </Link>
-          {' · '}
-          <Link to="/login" className="font-semibold text-blue-600 hover:underline">
-            Back to sign in
-          </Link>
-        </p>
+          <p className="text-center text-[0.95rem] text-ink-900/80">
+            <Link
+              to="/forgot-password"
+              className="font-semibold text-blue-600 hover:underline"
+            >
+              Forgot your password?
+            </Link>
+            {' · '}
+            <Link
+              to="/signup"
+              className="font-semibold text-blue-600 hover:underline"
+            >
+              Wrong address?
+            </Link>
+          </p>
+        </div>
       </div>
     </AuthLayout>
   )
