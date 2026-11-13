@@ -415,3 +415,33 @@ and this entry amended rather than ignored.
 
 *Not a defect:* Google, Slack and Shopify all disclose this deliberately. The
 choice here is for Auther, not a judgement that disclosure is always wrong.
+
+### D23 — Google OAuth is DEFERRED, not failed · **recorded**, 2026-11-13
+
+Stated explicitly because the login and sign-up screens both render a
+**"Continue with Google"** button, and a reader could reasonably conclude from
+a non-working control that something was attempted and broke.
+
+**Nothing has been attempted.** No OAuth provider is configured in Supabase, no
+client ID exists, no redirect URI is registered, and `authService.js` has no
+`signInWithOAuth` call. There is no partial implementation and no failing code
+path.
+
+*Why the button exists.* It is in the approved design (0.2). Removing it would
+diverge from that design; leaving it silently inert would read as a bug. So
+`SocialButton` renders the approved control and, when pressed, says plainly:
+*"Google sign-in is not enabled yet. Please sign in with your email address for
+now."* An honest dead end beats a mute one.
+
+*Where it sits:* roadmap Milestone 13, alongside MFA, audit log and avatar
+storage — **after** Milestone 8's security pass. It is additive: a provider
+configured in Supabase, one `signInWithOAuth` call, one redirect URI. No schema
+change, no policy change, no change to the session model.
+
+*One thing to settle when it is picked up:* a Google account whose address
+matches an existing email/password account. Supabase's identity-linking
+behaviour decides whether that becomes one account or two, and the answer
+affects `profiles` and the new-user trigger. Not a problem today — recorded so
+it is not discovered then.
+
+**Status: deferred by choice, zero work done, nothing broken.**

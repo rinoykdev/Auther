@@ -1343,7 +1343,7 @@ Reordered so that the core authentication module is complete and tested before a
 | 10 | Role-based authorization: `has_role`, `RoleGuard`, admin-only paths, and any role beyond `user` / `admin`. **The table, its grants, its policies and the default-role trigger land in Milestone 3** (D.7) |
 | 11 | Admin panel, including the authorized server-side read path in D.6 |
 | 12 | Account deletion (reauthentication plus Edge Function, per C.8) |
-| 13 | Optional: MFA, social login, audit log, avatar storage |
+| 13 | Optional: MFA, **Google OAuth / social login (deferred by choice — D23, no work attempted, nothing broken)**, audit log, avatar storage |
 | 14 | **Frontend deployment** — hosting choice, production Supabase project, environment variables, and the security headers deferred from E.6 |
 
 Database work moved ahead of the auth flows (now Milestone 3) because grants and RLS are the thing everything else depends on, and because a policy bug found in Milestone 3 is cheap while the same bug found in Milestone 8 has had five milestones of code written on top of it.
