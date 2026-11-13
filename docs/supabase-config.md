@@ -157,12 +157,47 @@ not confirmed. Stronger than documentation; weaker than measurement.
 | **One code at a time** | A single `reauthentication_token` column per user. A resend **overwrites** the previous code | `internal/models/user.go` |
 | **Recovery flow unaffected** | A recovery link mints a fresh session, so `ResetPasswordPage` stays inside the fast path | — |
 
-**Still unread — both need the dashboard:**
+#### Dashboard verification, 2026-11-13 — **configuration only**
 
-| | |
+Read in the dashboard by the user. **Configuration verified; delivery not
+tested** — the distinction is kept because a correct template and a received
+email are different claims, and only the first has been checked.
+
+| | Finding |
 | --- | --- |
-| ⬜ **Reauthentication email template** | Authentication → Emails → Reauthentication. Must exist, be enabled, and contain **`{{ .Token }}`** — a code to type, not `{{ .ConfirmationURL }}` |
-| ⬜ **Email OTP Expiration value** | It is also the reauthentication code's lifetime. The UI needs the number |
+| Reauthentication template | ✅ Exists |
+| — body | ✅ contains `{{ .Token }}` |
+| — subject | ✅ contains `{{ .Token }}` |
+| — style | ✅ **Code-based**, not a confirmation link. This is the one that would have dead-ended the flow |
+| **Email OTP Expiration** | **3600 seconds = 60 minutes** |
+| Custom SMTP | ❌ **Not configured** — the built-in sender, with its project-wide rate limits (open item O1) |
+
+> ⚠️ **No reauthentication email has ever been sent from this project.** That
+> it is configured correctly says nothing about whether it is delivered, how
+> long it takes, or whether it survives spam filtering. The first real test is
+> Milestone 7's aged-session pass.
+
+**Three consequences recorded here rather than left to be rediscovered:**
+
+1. **`Mailer.OtpExp` is shared.** 60 minutes is the lifetime of the
+   reauthentication code, the signup confirmation link **and** the password
+   recovery link. There is no per-flow expiry. Shortening it for one shortens
+   all three — which is why the long reauthentication window is a Milestone 8
+   question, not an M7 change.
+2. **60 minutes is long for a reauthentication code** (5–15 is typical). What
+   contains it: the code is single-use and cleared on a successful password
+   update. The exposure is an unused code remaining valid in a mailbox for an
+   hour.
+3. **The code appears in the subject line**, so it is readable from a lock
+   screen or notification preview without opening the mailbox. Good for
+   usability; it slightly weakens what the code proves, since reauthentication
+   is a test of mailbox control. Supabase's default, unchanged, recorded as a
+   tradeoff rather than an accident.
+
+**Three emails now depend on the built-in sender:** signup confirmation,
+password recovery, and reauthentication. The last is the one where exhausting
+the rate limit locks a user out of changing their own password — which is why
+the resend cooldown is an acceptance criterion in Milestone 7.
 
 > **Note on the other-sessions behaviour.** It is not instant. Milestone 2
 > measured that PostgREST keeps accepting an existing **access** token until it

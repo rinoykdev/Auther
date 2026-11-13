@@ -7,7 +7,7 @@ Awaiting your approval. **Nothing in this file has been built.**
 | Plan | `milestone-7-plan.md` (revised 2026-11-13) |
 | Approved decisions | D-A, D-B, D-C, D-D, D-E — see `decisions.md` D24 |
 | Open decisions | **None.** D-F approved 2026-11-13 |
-| Blocked on | **V1** — the reauthentication email template (dashboard, yours) |
+| Configuration | ✅ **Verified 2026-11-13** — V1 and the OTP expiry. ⚠️ **Delivery not tested** |
 | 🔴 Still open | **D12 — no breached-password protection. M7 does not close it** |
 
 > **D12, stated once and plainly.** Nothing in this milestone checks a password
@@ -18,18 +18,63 @@ Awaiting your approval. **Nothing in this file has been built.**
 
 ---
 
-## 0 · Before any code
+## 0 · Configuration — verified 2026-11-13
 
-- [ ] **V1 · Reauthentication email template.** Dashboard → Authentication →
-      Emails → Reauthentication. Confirm it exists, is enabled, and contains
-      **`{{ .Token }}`** (the typed code) rather than `{{ .ConfirmationURL }}`.
-      **Step 7 is blocked until this is answered** — not for the code, for the
-      testing.
-- [ ] **Email OTP expiry value.** Read it; it is also the reauthentication code's
-      lifetime (V3). The UI states this number.
+### ✅ V1 · Reauthentication email template — **configuration verified**
+
+| | |
+| --- | --- |
+| Template exists | ✅ |
+| **Body** contains `{{ .Token }}` | ✅ |
+| **Subject** contains `{{ .Token }}` | ✅ |
+| Code-based, not a confirmation link | ✅ — this was the thing that would have dead-ended the flow |
+| Custom SMTP | ❌ **Not configured** — built-in sender (O1) |
+
+> ⚠️ **Verified as configured. NOT verified as delivered.** Nobody has yet
+> received one of these emails. The template is correct; that the project can
+> actually send it, that it arrives, and that it survives spam filtering are
+> three separate claims and none of them has been tested.
+>
+> **§5.2 test 3 is the first real delivery test**, which is a second reason to
+> schedule the aged session below rather than let test 3 close as ⬜ under D-E.
+> If it does close unexercised, the test report must say that **delivery of the
+> reauthentication email was never observed** — not merely that the aged-session
+> path was not walked.
+
+**Observation, not a defect: the code is in the subject line.** It appears on a
+lock screen or notification preview without the mailbox being opened. That is
+good for usability — most people will read the code without leaving the app —
+and it slightly weakens what the code proves, since reauthentication is a test
+of *mailbox control*. Supabase's default template, unchanged. Recorded so the
+tradeoff is a decision rather than an accident; **no change proposed for M7.**
+
+### ✅ Email OTP Expiration — **3600 seconds = 60 minutes**
+
+- [x] Read from the dashboard, 2026-11-13.
+- [ ] **The code field states "valid for 60 minutes".** Not "1 hour" — the
+      dashboard value is in minutes and the copy should match what you would
+      read there when a user asks.
+- [x] **No conflict with the 60-second resend cooldown.** The earlier worry
+      (V3) was that a cooldown could outlive the code; 60 seconds against 60
+      minutes settles it.
+
+> **60 minutes is long for a reauthentication code**, and it is not separately
+> adjustable — `Mailer.OtpExp` is shared with signup confirmation and password
+> recovery, so shortening it for this flow would shorten those links too. A
+> typical reauthentication window is 5–15 minutes.
+>
+> What contains it: the code is **single-use**, and `UpdatePassword` clears
+> `reauthentication_token` on success. The exposure is a 60-minute window in
+> which an unused code sitting in a mailbox remains valid.
+>
+> **Not an M7 change.** Recorded as a question for Milestone 8, where the rate
+> limits and `security.md`'s gate are reviewed together.
+
+### Still to do before step 5
+
 - [ ] **Schedule the aged session.** Sign in on a dedicated browser profile and
-      leave it. It must be >24h old by step 9, or test 3 closes as ⬜ under D-E.
-- [ ] Record V1 and the expiry value in `supabase-config.md`.
+      leave it alone. It must be **>24h old** by step 8, or test 3 closes ⬜
+      under D-E — and with it the only delivery test of the template above.
 
 ---
 
@@ -113,7 +158,7 @@ Lives entirely inside the change-password card on `/settings/security`.
       four impatient clicks lock the user out of the code they are waiting for.
 - [ ] *Resend* copy says a **new code replaces the previous one** (V3 — there is
       one token slot per user; an earlier code silently stops working).
-- [ ] The code field states the expiry read in §0.
+- [ ] The code field states **"valid for 60 minutes"** (§0).
 - [ ] `done` state: success alert that **also says other devices are signed
       out** (V2) — and **does not say "immediately"**. Milestone 2 measured that
       an existing access token keeps working against PostgREST for up to an
@@ -273,7 +318,7 @@ the second account the open items already require.
 
 | Step | | Why here |
 | --- | --- | --- |
-| 1 | §0 verification | V1 blocks testing, not coding — but discovering a link-based template at step 7 wastes step 7 |
+| 1 | ✅ §0 — **done 2026-11-13**. Only the aged-session sign-in remains | The template is code-based, so the flow is buildable. Delivery is still unproven |
 | 2 | `profileService` + tests | Smallest, no auth interaction |
 | 3 | `/profile` + tests | |
 | 4 | Change-email card + tests | Independent of everything in §2 |
