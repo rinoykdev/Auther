@@ -248,7 +248,14 @@ possess, recorded with `granted_by` (D.7.1). A feature that creates the first
 admin must be reachable by someone who is not yet an admin — a
 privilege-escalation path with a friendly label.
 
-### R1 — `user_roles` moves into Milestone 3 · **proposed**, revision 7 ⚠️ *awaiting approval; changes milestone scope*
+### R1 — `user_roles` moves into Milestone 3 · **APPROVED**, 2026-11-13 ✅
+
+**Approved with a standing constraint:** role assignment stays restricted to
+trusted processes, and normal users must never be able to modify their own
+roles. Enforced at gate 1 — `authenticated` holds `SELECT` on `user_roles` and
+no write privilege of any kind — so the attempt dies before any policy is
+consulted. `045_default_role.sql` asserts no function body in `public` contains
+the elevated role name as a literal. See D.7.1 for out-of-band provisioning.
 
 Requirements 8–10 are security properties. **Requirement 9 — the first registered
 user is not an admin — cannot be tested unless roles are a real object**: with an
@@ -266,7 +273,7 @@ existing user plus a change to a trigger that is by then in the live sign-up pat
 requirement 9 becomes untestable, and §4.5 plus `045_default_role.sql` drop out of
 the plan. Nothing else changes.
 
-### D20 — pgTAP runs on the runner's own PostgreSQL, not a Supabase service container · **revised**, Milestone 3 ⚠️ *changes an approved condition (H.6 condition 1)*
+### D20 — pgTAP runs on the runner's own PostgreSQL, not a Supabase service container · **APPROVED WITH CONDITIONS**, 2026-11-13 ✅
 
 **What D13 approved:** a pinned `supabase/postgres` service container, chosen
 so that extensions and base roles would match the platform.
@@ -293,9 +300,36 @@ project. D20 moves that check from advisable to **load-bearing**, and the
 pinned-version condition now applies to the runner's PostgreSQL and pgTAP
 packages.
 
-**This needs your approval**, because it changes an approved condition. If you
-would rather keep the Supabase image, the remaining route is a CI-only hosted
-project — which D13 rejected for good reasons that have not changed.
+#### Approval conditions (2026-11-13)
+
+1. **Runner-local PostgreSQL for CI** — accepted.
+2. **PostgreSQL 16.15 pinning retained** — `PG_MAJOR: '16'` stays in the
+   workflow. A major-version bump is a decision, not a dependency refresh.
+3. **Supabase Cloud parity verification stays mandatory** — H.6.1 P1 (before
+   production release) and P2 (whenever the bootstrap changes) are not
+   waivable. D20 is the reason they are load-bearing rather than advisable.
+
+#### Differences from the container decision D13 approved
+
+| | D13 — `supabase/postgres` container | D20 — runner-local PostgreSQL |
+| --- | --- | --- |
+| Base roles | Shipped by the image | **Recreated by `02_roles.sql`** — ours, and only as faithful as we wrote them |
+| `auth` schema and `auth.users` | Shipped by the image | **Recreated by `03_auth.sql`** with an ownership guard |
+| `auth.uid()` / `jwt()` / `role()` | The platform's real implementations | **Our reimplementations** — behaviour matched under fixed claim fixtures by H.6.1 category 4, not by shared code |
+| Extensions | The platform's set | pgtap + pgcrypto only, from distribution packages |
+| Privilege level | `postgres`, not superuser, not a member of `supabase_admin` — **the blocker** | Real superuser; fixture constructible |
+| Version pinning | Image tag | `PG_MAJOR: '16'` + distribution pgTAP (1.3.2 observed) |
+| Docker | Yes | **No** — closer to A.5 |
+| What catches divergence | The image, partially | **H.6.1 parity check, entirely** |
+
+**The honest summary:** we traded a partial, free fidelity guarantee for a
+complete, manual one. The parity check is now the only thing standing between
+the CI reconstruction and the live project. If it is skipped, every pgTAP result
+covering a diverged object is unproven (H.6.1 failure step 3).
+
+**Open consequence:** the parity check will also establish whether the cloud
+project's PostgreSQL major version matches the `PG_MAJOR: '16'` pin. If it does
+not, condition 2 needs revisiting.
 
 ---
 
@@ -306,8 +340,48 @@ project — which D13 rejected for good reasons that have not changed.
 | O1 | Custom SMTP provider | **Milestone 4** | The built-in sender is rate-limited; the limit bites when building registration and reset. Moved earlier by D1, which removed the local inbox |
 | O2 | Compensating control for D12 | Before production; relevant at Milestone 4 | A client-side HaveIBeenPwned check would live in the signup form. UX only — must not be recorded as satisfying E.1 |
 | O3 | Email-dependent E2E testing | Milestone 4 | No automated inbox exists; deliberately not introduced in Milestone 2 |
-| O4 | Additional roles beyond `user` / `admin` | Milestone 10 | |
+| O4 | Additional roles beyond `user` / `admin` | Milestone 10 | Superseded in the near term by O8's closure — two roles only. Reopens only if Milestone 10 surfaces a genuine need |
 | O5 | Deployment target and the E.6 headers | Milestone 14 | Deferred by D2 |
 | O6 | Pinned `supabase/postgres` image version for CI | **Milestone 3, before the workflow is written** | H.6 condition 1 requires an exact version. Which version is a Milestone 3 decision, recorded here so it is chosen rather than defaulted |
-| O7 | **R1 — `user_roles` in Milestone 3?** | **Before Milestone 3 begins** | The only scope change in revision 7. Recommended; see R1 above |
-| O8 | A third role beyond `user` / `admin` | **Before the `app_role` enum is created** (Milestone 3) | Free to add to a table that does not exist; a migration and a policy review afterwards. Checklist item 20 |
+| ~~O7~~ | ~~R1 — `user_roles` in Milestone 3?~~ | — | **CLOSED 2026-11-13 — approved.** See R1 |
+| ~~O8~~ | ~~A third role beyond `user` / `admin`~~ | — | **CLOSED 2026-11-13 — two roles only: `user`, `admin`.** No third role required now. The enum stays extensible: adding a value later is `alter type ... add value`, which is cheap; **removing** one is not, which is why the set was kept minimal. Any addition still requires a policy review (checklist item 20) |
+
+### D21 — default privileges are narrowed globally, and the result is measured · **recorded**, 2026-11-13
+
+`04_default_privileges.sql` originally carried only `IN SCHEMA public` entries.
+Two problems, found during pre-migration review:
+
+**1. The per-role revokes were close to inert.** `anon` and `authenticated` are
+not granted `EXECUTE` on new functions as themselves — they receive it through
+**`PUBLIC`**, and every role is implicitly a member of `PUBLIC`. That membership
+cannot be revoked. `revoke all on functions from anon, authenticated` therefore
+leaves both still able to execute. The load-bearing statement is
+`revoke execute on functions from public`; the per-role lines are kept only to
+undo Supabase's own shipped entries.
+
+**2. Schema scope is not global scope.** `pg_default_acl` rows are keyed by
+`(defaclrole, defaclnamespace, defaclobjtype)`, `defaclnamespace = 0` meaning
+every schema. A new object's ACL is built from the hardwired default, then the
+global entry, then the schema-specific one — so a schema-scoped revoke *should*
+win inside `public`. **We do not rely on that**, and in any case it covers only
+`public`: a function created in any other schema still receives the hardwired
+`EXECUTE TO PUBLIC`.
+
+*Resolution:* both layers. Global entries first, `public`-scoped entries second.
+Both say REVOKE, so there is no ordering conflict to resolve either way.
+
+*Deliberately excluded — TYPES.* PostgreSQL also default-grants `USAGE` on new
+types to `PUBLIC`. Revoking it would break `select role from user_roles` for
+`authenticated`, since reading a `public.app_role` column requires `USAGE` on
+the type. Type `USAGE` conveys no access to data.
+
+*Role scope.* Without `FOR ROLE`, entries apply only to objects created by the
+role that ran the file. Pre-flight query 4 prints `current_user` and
+`session_user` so this is confirmed rather than assumed.
+
+**The method matters more than the fix.** The outcome is now *measured*, not
+argued: `025_default_privileges.sql` (CI) and `verify/02_default_acl_probe.sql`
+(cloud, by hand) each create a throwaway table and function and read back their
+real ACLs. A **NULL `proacl` is the failure signal** — it means no entry was
+recorded, so the hardwired `EXECUTE TO PUBLIC` stands. Same trap D-era `050`
+was rewritten to catch.
