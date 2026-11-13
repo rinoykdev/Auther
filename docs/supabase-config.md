@@ -142,6 +142,32 @@ depending on dashboard version.
 > that asks for the existing password instead of an emailed code. Its state on
 > this project is **unverified** — Milestone 7 step 1 checks it.
 
+#### Secure password change — behaviour read from the GoTrue source, 2026-11-13
+
+Read in `supabase/auth@master`. **Source-verified, not observed on this
+project** — Supabase Cloud runs a pinned release and the running version was
+not confirmed. Stronger than documentation; weaker than measurement.
+
+| | Finding | Where |
+| --- | --- | --- |
+| **The window** | `now.After(session.CreatedAt.Add(24*time.Hour))` — the age of the **session**, not of the last authentication. `24*time.Hour` is a literal, not configuration | `internal/api/user.go` |
+| **Scope of the gate** | Inside `if params.Password != nil`. **Email change is NOT gated** | `internal/api/user.go` |
+| **Other sessions** | A password change calls `LogoutAllExceptMe` and clears every outstanding one-time token. **The user's other devices are signed out** | `internal/models/user.go` |
+| **Code lifetime** | Validated against `config.Mailer.OtpExp` — the **same Email OTP Expiration** setting as every other email OTP. There is no separate reauthentication expiry | `internal/api/reauthenticate.go` |
+| **One code at a time** | A single `reauthentication_token` column per user. A resend **overwrites** the previous code | `internal/models/user.go` |
+| **Recovery flow unaffected** | A recovery link mints a fresh session, so `ResetPasswordPage` stays inside the fast path | — |
+
+**Still unread — both need the dashboard:**
+
+| | |
+| --- | --- |
+| ⬜ **Reauthentication email template** | Authentication → Emails → Reauthentication. Must exist, be enabled, and contain **`{{ .Token }}`** — a code to type, not `{{ .ConfirmationURL }}` |
+| ⬜ **Email OTP Expiration value** | It is also the reauthentication code's lifetime. The UI needs the number |
+
+> **Note on the other-sessions behaviour.** It is not instant. Milestone 2
+> measured that PostgREST keeps accepting an existing **access** token until it
+> expires — up to an hour. What is revoked at once is the refresh token.
+
 ### 3. Rate limits
 
 **Authentication → Rate Limits**

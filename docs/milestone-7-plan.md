@@ -62,7 +62,7 @@ Supabase Auth operations that never touch our tables.
 | --- | --- | --- | --- | --- |
 | **Display name** | PostgREST → `public.profiles` | ✅ yes | No | No |
 | **Change password** | Supabase Auth `updateUser` | ❌ no | **Yes — conditionally. See §3.4** | **Yes, when the code is requested** |
-| **Change email** | Supabase Auth `updateUser` | ❌ no | Unverified — §10 V4 | **Yes — to BOTH addresses** |
+| **Change email** | Supabase Auth `updateUser` | ❌ no | **No** — source-verified, §10 V4 | **Yes — to BOTH addresses** |
 
 Consequences worth stating up front:
 
@@ -240,7 +240,7 @@ route. Leaving `/settings/security` discards it; that is intended.
 | `submitting` | Disabled form, spinner on the button | |
 | `awaiting code` | **Both password fields collapse into a read-only summary.** One code field, submit, "Resend code" with a cooldown, "Cancel" | Explain *why*: "For your security, confirm it is you. We have emailed a code to `user@example.com`." |
 | `verifying` | Disabled, spinner | |
-| `done` | Success alert. Form resets to `idle`, emptied | §10 V2 decides whether a sign-out warning belongs here |
+| `done` | Success alert. Form resets to `idle`, emptied | **Must state that other devices are signed out** — §10 V2. Without the word "immediately" |
 | `error` | `Alert tone="error"` above the active step | The step does not reset |
 
 **Error mapping.** Two new codes go into `errorMessages.js`; the first is a
@@ -269,8 +269,8 @@ both wrong (it has not; it is still working) and alarming.
 - No new route, no `navigate()`, no `location.state` carrying anything.
 - The password never leaves component memory except in the `updateUser` call.
 - The code is a **nonce**, not a credential: single-use, shown once, never stored.
-- The change-email card is **independent** — it does not enter this state
-  machine unless §10 V4 shows that it must.
+- The change-email card is **independent** and stays that way — V4 confirms
+  from source that email change is not gated.
 - No `console.log` of the token, the code, or the password, in any state.
 
 ---
@@ -437,6 +437,8 @@ second account, which the open items already require for requirement 7.
 - [ ] The new password survives the code step **in memory only** — no storage, no URL, no route state
 - [ ] Resend is rate-limited by a cooldown
 - [ ] The code is never logged and never persisted
+- [ ] The success state tells the user their **other devices are signed out** (V2), without the word "immediately"
+- [ ] Resend copy makes clear that a **new code replaces the previous one** (V3)
 
 **Security**
 
@@ -461,8 +463,8 @@ second account, which the open items already require for requirement 7.
 
 | # | Step | Output |
 | --- | --- | --- |
-| 1 | **Settle §10 V1–V6** — the facts the dashboard toggle does not tell us | Written answers in `supabase-config.md` |
-| 2 | **Approve §9 D-A … D-E** | |
+| 1 | **V1 and the OTP expiry value** — the two dashboard facts still unread. V2, V3, V4, V6 are answered in §10 | Written answers in `supabase-config.md` |
+| 2 | **Approve D-F** (D-A … D-E approved 2026-11-13) | |
 | 3 | `profileService.js` + tests | |
 | 4 | `/profile` + tests | |
 | 5 | Change-email card + tests | |
@@ -490,81 +492,163 @@ old enough by step 9.
 | --- | --- |
 | ~~Q1 extra profile fields~~ | **Display name only.** Open decision 9 closed for M7 |
 | ~~Q2 `avatar_url` behaviour~~ | **Deferred entirely** — no upload, no URL field. Column stays, UI does not |
-| ~~Q3 sign out of all devices~~ | **Deferred.** Open decision 12 remains open |
+| ~~Q3 sign out of all devices~~ | **Deferred.** Open decision 12 remains open — but see V2 below: a password change already does this as a side effect |
 | ~~Q4 dashboard as landing page~~ | **Yes, unchanged.** M7 adds navigation only |
 | ~~Is secure password change enabled?~~ | **Yes.** Confirmed in the dashboard, 2026-11-13 |
 
-### Open — your approval needed before step 3
+### Approved 2026-11-13 — binding on implementation
 
-**D-A · Does the app pre-check recency, or attempt and react?**
-*Recommendation: **attempt and react** (§3.4.2).* The server holds the input to
-the decision; the token does not carry it; the alternative builds a gate on a
-proxy for someone else's variable. The cost is one wasted round trip for a
-stale session — about 300ms, once a day at most, before an email the user then
-waits on anyway.
+| | Decision |
+| --- | --- |
+| **D-A** ✅ | **Attempt the password update and react to the server response.** No client-side recency prediction |
+| **D-B** ✅ | **"Require current password" stays OFF for M7.** Revisit in M8 |
+| **D-C** ✅ | **Reauthentication stays in-place on `/settings/security`.** No route |
+| **D-D** ✅ | **The typed password lives in component memory only.** Never storage, URL or route state |
+| **D-E** ✅ | **M7 may close with the aged-session cloud test recorded as ⬜ unexercised,** provided the unit tests and the other acceptance criteria pass |
 
-**D-B · Also enable *require current password*?**
-A **separate** Supabase setting — frequently confused with secure password
-change, including in Supabase's own CLI docs. It asks for the existing password
-instead of an emailed code.
-*Recommendation: **not in M7**.* It is a second design, a second set of states
-and a second set of tests, on top of a flow that is not yet built. Worth
-revisiting in Milestone 8 — it is strictly better UX than an emailed code, and
-it does not depend on the mail sender. Flagging it now because turning it on
-mid-implementation would invalidate step 7's tests.
+### Open — raised by the verification below
 
-**D-C · Where does the code step live?**
-*Recommendation: **in-place state on `/settings/security`** (§3.4.3).* A route
-would need the typed password to survive navigation, and the only places to put
-it are the ones §3.4.3 forbids.
+**D-F · How is `email_exists` shown on the change-email form?**
+Source reading (V4) shows that changing to an address already registered
+returns `422 email_exists`. **This is a membership oracle** — the same class of
+thing H.3 Family 3 exists to close — but reachable only by an authenticated
+user, one address at a time, against a rate limit.
 
-**D-D · Is the typed password kept across the code step?**
-*Recommendation: **yes, in component memory only**.* Retyping after a trip to
-the inbox is where users pick something weaker. The constraint is where it is
-stored, not whether it is kept.
+It cannot be suppressed: the server refuses, so the form must say *something*
+or it appears broken.
 
-**D-E · If the aged-session manual test (6.3 test 3) cannot be scheduled, does M7 still close?**
-*Recommendation: **yes, with the gap recorded** ⬜ in the test report.* The
-alternative is holding a finished milestone open for a clock. But it must be
-recorded as unexercised, not implied as passing — the same discipline as
-`auth-flow-test-report.md`.
+*Recommendation:* map it to **"That address can't be used. Try a different
+one."** — true, actionable, and it does not state that an account exists. A
+determined signed-in attacker can still infer it; the aim is to avoid handing
+it over in plain words, not to pretend the inference is impossible. Record the
+residual exposure in `security.md` rather than claim it is closed.
 
 ---
 
-## 10. Supabase-specific limitations and assumptions to verify
+## 10. Supabase behaviour — verification results
 
-The dashboard toggle answers one question. These are the ones it does not, and
-each would change the plan if the answer surprises us. **Step 1 of §8.**
+> **Three tiers of confidence, kept apart deliberately.**
+>
+> | | Means |
+> | --- | --- |
+> | 🟢 **Observed** | Measured against this project. The standard set by `token-claims.md` |
+> | 🔵 **Source-verified** | Read in the `supabase/auth` source. Stronger than documentation, **weaker than observation** — Supabase Cloud runs a pinned release, not `master`, and the running version was not confirmed |
+> | ⚪ **Assumed** | Documentation or community discussion. Not evidence |
+>
+> Nothing below is promoted from ⚪ to 🔵 or 🟢 without the thing that earns it.
+> The previous revision of this plan carried the 24-hour window as ⚪; it is now
+> 🔵, and the difference is that the line of code has been read.
 
-| | Assumption | Why it matters | How to check |
-| --- | --- | --- | --- |
-| **V1** | The **Reauthentication** email template exists, is enabled, and renders the code (`{{ .Token }}`) | If it ships empty or disabled, the user gets a blank email and the flow dead-ends with no error anywhere | Dashboard → Authentication → Email Templates. Read the template body |
-| **V2** | A password change does **not** silently revoke the user's other sessions | If it does, the UI must say so — otherwise the user's phone logs out with no explanation. It would also partially satisfy Q3, which we have just deferred | Sign in on two browsers, change the password on one, use the other |
-| **V3** | The code's validity window, and whether it is the same as the email OTP expiry | Decides the copy ("valid for N minutes") and whether the cooldown can outlive the code | Dashboard → Auth → the OTP expiry setting; confirm by letting one expire |
-| **V4** | **Email change is not also gated** by reauthentication | §2 marks this unverified. If it is gated, the change-email card needs the same state machine and §6.1 grows | Attempt an email change from a session older than 24 hours |
-| **V5** | *Require current password* is **off** | If it is already on, the flow in §3.4 is wrong — it would need a current-password field as well | Dashboard → Authentication → Sign In / Providers → Email |
-| **V6** | GoTrue measures the window from session **creation**, not last refresh | A refresh-based window would never expire for an active user, making the stale branch nearly unreachable and 6.3 test 3 untestable rather than merely slow | Cannot be checked from the dashboard. Either read `supabase/auth` source at the pinned release, or treat the aged-session test as the check |
+### V1 · Reauthentication email template — ⬜ **NOT VERIFIED. Needs you.**
 
-**Two facts are already settled and are not open questions:**
+**This one I cannot check** — it is dashboard state on your project, and it is
+the single item that would make the whole flow dead-end silently.
 
-1. **The 24-hour window is hardcoded.** It cannot be shortened for testing or
-   lengthened for convenience. Every design here assumes it is fixed.
-2. **The nonce is ignored inside the fast path.** "Always send a code to be
-   safe" is not available as a simplification.
+> **Dashboard → Authentication → Emails → Reauthentication.** Please confirm:
+>
+> 1. The template **exists** and is not disabled.
+> 2. Its body contains **`{{ .Token }}`** — the 6-digit code. Not
+>    `{{ .TokenHash }}`, not `{{ .ConfirmationURL }}`. Reauthentication is a
+>    **code to type**, not a link to click; a template built around a link
+>    sends the user something they cannot use.
+> 3. The subject line is recognisable as a security action.
 
-**Sources:**
-[JavaScript: updateUser](https://supabase.com/docs/reference/javascript/auth-updateuser) ·
-[JavaScript: reauthenticate](https://supabase.com/docs/reference/javascript/auth-reauthentication) ·
-[Password security](https://supabase.com/docs/guides/auth/password-security) ·
-[Make the session age condition configurable (discussion #32972)](https://github.com/orgs/supabase/discussions/32972) ·
-[Questions about Secure Password Change and Reauthentication (#34323)](https://github.com/orgs/supabase/discussions/34323) ·
-[How to properly verify the reauthentication OTP (#34956)](https://github.com/orgs/supabase/discussions/34956) ·
-[docs: correct `secure_password_change` and add `require_current_password` (PR #53249)](https://github.com/supabase/supabase/pull/53249)
+Until that is answered, step 7 is blocked — not because the code cannot be
+written, but because there is no way to test it.
 
-> Items marked from community discussions rather than reference documentation
-> are flagged as such above. The 24-hour figure appears in Supabase's own
-> `updateUser` reference; that it is **hardcoded** comes from a feature-request
-> discussion, which is why V6 exists rather than being assumed.
+### V2 · A password change **does** sign out the user's other sessions — 🔵 **source-verified**
+
+`models.User.UpdatePassword` calls **`LogoutAllExceptMe(sessionID, userID)`**,
+and `Logout(userID)` — *all* sessions — when there is no session. It also
+clears every outstanding one-time token: confirmation, recovery, email-change,
+phone-change and reauthentication.
+
+**Three consequences, and the first changes the UI.**
+
+1. **The copy must say so.** "You'll be signed out on your other devices."
+   Otherwise the user's phone logs out an hour later with no explanation — the
+   kind of unexplained event that reads as a compromise.
+2. **It is not instant, and we must not imply that it is.** Milestone 2
+   measured that **PostgREST keeps accepting an existing access token until it
+   expires** — up to an hour — after sign-out. What is revoked immediately is
+   the *refresh* token. So: *"Other devices will be signed out"*, never
+   *"immediately"*.
+3. **Q3 is partly answered by accident.** Sign-out-everywhere is deferred, yet
+   a password change already performs it. That does not reopen Q3 — it means
+   the *deferral* is narrower than it sounded, and open decision 12 should say
+   so.
+
+### V3 · The code's validity window = the **email OTP expiry** — 🔵 **source-verified**, value ⬜ unread
+
+`verifyReauthentication` validates the nonce with `config.Mailer.OtpExp` — the
+**same** expiry as every other email OTP on the project. There is no separate
+reauthentication setting.
+
+> **Dashboard → Authentication → Emails (or Providers → Email) → Email OTP
+> Expiration.** Please read the value, so the copy can state a real number.
+
+Two further source facts shape the UI:
+
+- **There is one token slot per user** (`reauthentication_token`). A resend
+  **overwrites** the previous code. If a user requests twice, only the newer
+  code works — so the UI must not leave the earlier email looking equally
+  valid.
+- **The window starts when the code is sent**, not when the form is opened.
+
+### V4 · Email change is **NOT** gated by reauthentication — 🔵 **source-verified**
+
+The reauthentication check sits inside `if params.Password != nil`. An email
+change is unaffected. **The change-email card therefore needs no state
+machine** (§3.4.5 stands), and §2's "Unverified" row is now answered: **No**.
+
+Two other gates do apply to it, neither relevant today but both worth knowing:
+
+| Gate | Effect | Relevant now? |
+| --- | --- | --- |
+| **MFA / AAL2** | With MFA enabled, changing email *or* password from an `aal1` session returns `insufficient_aal` | No — MFA is M13. **It will matter then**, and it affects both cards |
+| **`email_exists`** | Changing to a registered address returns `422` | **Yes** — see D-F |
+
+### V6 · The window is measured from session **creation** — 🔵 **source-verified**
+
+```go
+// we require reauthentication if the user hasn't signed in recently in the current session
+if session == nil || now.After(session.CreatedAt.Add(24*time.Hour)) {
+```
+
+`session.CreatedAt`. Not `refreshed_at`, not `updated_at`, not any token claim.
+The `24*time.Hour` is a literal in the handler — **not configuration**, which
+is what "hardcoded" meant in the previous revision and is now read rather than
+assumed.
+
+**This closes the worry behind V6.** A refresh-based window would never expire
+for an active user and would have made the stale branch nearly unreachable. It
+is creation-based, so **every session reaches it after a day**, and the stale
+branch is the common case for returning users — not an edge case.
+
+Note also `session == nil` → reauthentication required. Not reachable from our
+flow, which always holds a session, but it is why the service layer must handle
+the branch rather than treat it as impossible.
+
+### What is still ⚪ assumed
+
+| | |
+| --- | --- |
+| **The release running on Supabase Cloud matches `master`** | The one assumption underneath every 🔵 above. The handler's shape has been stable for years, but "stable for years" is not "verified today" |
+| Whether Supabase Cloud sends a **password-changed notification** email | The source has a `password_changed_notification` template; whether it is enabled on hosted projects is unknown. If it is, the user receives mail we did not plan for |
+| The exact wording of the hosted reauthentication template | V1 |
+
+**Sources.** Reference documentation:
+[updateUser](https://supabase.com/docs/reference/javascript/auth-updateuser) ·
+[reauthenticate](https://supabase.com/docs/reference/javascript/auth-reauthentication) ·
+[Password security](https://supabase.com/docs/guides/auth/password-security).
+Source, read 2026-11-13 at `supabase/auth@master`:
+[`internal/api/user.go`](https://github.com/supabase/auth/blob/master/internal/api/user.go) ·
+[`internal/api/reauthenticate.go`](https://github.com/supabase/auth/blob/master/internal/api/reauthenticate.go) ·
+[`internal/models/user.go`](https://github.com/supabase/auth/blob/master/internal/models/user.go).
+Community discussion, **not** treated as evidence:
+[#32972](https://github.com/orgs/supabase/discussions/32972) ·
+[#34323](https://github.com/orgs/supabase/discussions/34323) ·
+[#34956](https://github.com/orgs/supabase/discussions/34956).
 
 ---
 
@@ -576,6 +660,8 @@ each would change the plan if the answer surprises us. **Step 1 of §8.**
 | **Rendering `reauthentication_needed` as an error** | The most likely way the reauthentication flow ships broken: it looks like a handled error, so nothing crashes and nobody notices the user simply cannot change their password |
 | **The stale branch never being exercised** | It is the branch most users will hit, and the hardest to reach deliberately. Mitigated by §6.3's scheduling note and D-E |
 | **Rate-limiting the user out of their own password change** | The code email shares the project-wide built-in sender (O1). Mitigated by the cooldown; genuinely fixed only by custom SMTP |
+| **Silent sign-out on the user's other devices** | V2: a password change calls `LogoutAllExceptMe`. Unannounced, it reads to the user as a compromise. Mitigated only by copy, which is why the `done` state is an acceptance criterion |
+| **A second code invalidating the first** | V3: one token slot per user. A user who requests twice and then types the first code is refused with no explanation unless the resend says so |
 | **Adding `email` to `profiles`** | It would make `/profile` simpler and is explicitly rejected by D.2 |
 | FORCE RLS confusing verification | Mitigated by §5.1 |
 | 🔴 **D12** | **Not mitigated, and reauthentication does not touch it.** Proving *who* is setting a password says nothing about *what* they are setting it to. M7 adds a second entry point for a breached password and must not appear to close D12 |

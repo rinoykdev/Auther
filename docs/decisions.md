@@ -445,3 +445,32 @@ affects `profiles` and the new-user trigger. Not a problem today — recorded so
 it is not discovered then.
 
 **Status: deferred by choice, zero work done, nothing broken.**
+
+---
+
+### D24 — Milestone 7 reauthentication design · **APPROVED**, 2026-11-13
+
+Secure password change is ON (`supabase-config.md`), so a password change from
+a session older than 24 hours requires an emailed code. Five decisions approved
+together; they bind the implementation.
+
+| | Decision | The reasoning that mattered |
+| --- | --- | --- |
+| **D-A** | **Attempt the update and react to the server's response.** No client-side recency prediction | The token does not carry the input to the decision. `token-claims.md` §1 measured the claim set: there is **no session `created_at`**. `amr[].timestamp` is a *proxy* for a different quantity, and a gate built on a proxy for someone else's variable drifts out of agreement silently. A React check is a hint, never a boundary |
+| **D-B** | **"Require current password" stays OFF for M7.** Revisit in M8 | A separate Supabase setting, routinely confused with secure password change — including in Supabase's own CLI docs. Enabling it mid-implementation would invalidate the reauthentication tests |
+| **D-C** | **Reauthentication is in-place on `/settings/security`.** No route | A route would require the typed password to survive navigation, and every place to put it is forbidden by D-D |
+| **D-D** | **The typed password lives in component memory only.** Never storage, URL or route state | Re-requesting it after a trip to the inbox is where users pick something weaker. The constraint is *where it is stored*, not *whether it is kept* |
+| **D-E** | **M7 may close with the aged-session cloud test recorded ⬜ unexercised,** provided the unit tests and other criteria pass | The 24-hour threshold is a literal in GoTrue and session age cannot be faked. The alternative is holding a finished milestone open for a clock. It must be recorded as unexercised, never implied as passing |
+
+**Consequence of D-A, worth stating separately:** `reauthentication_needed` is
+a **state transition, not an error**. It is converted to a status in
+`authService.changePassword` and never reaches `toUserMessage`. Rendering it as
+an error message is the way this flow ships broken — nothing crashes, and users
+simply cannot change their password.
+
+**Open:** D-F — how `email_exists` is worded on the change-email form. See
+`milestone-7-plan.md` §9.
+
+**Not closed by any of this: 🔴 D12.** Reauthentication proves *who* is setting
+a password. It says nothing about *what* they set it to. M7 adds a second entry
+point for a breached password.
