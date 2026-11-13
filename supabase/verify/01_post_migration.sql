@@ -13,7 +13,7 @@
 --    policies, so an owner-run query or a definer function reads every row.
 select c.relname,
        c.relrowsecurity      as rls_enabled,
-       c.relforcerowsecurity as rls_forced
+       c.relforcerowsecurity  as rls_forced
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
  where n.nspname = 'public' and c.relname in ('profiles','user_roles')
  order by c.relname;
